@@ -242,8 +242,9 @@ Question.prototype.renderErrors = function(existInDOM) {
 		return errorsHTML;
 	}
 }
-Question.prototype.hideErrors = function() {
+Question.prototype.clearErrors = function() {
 	$(this.errorsSelector).empty();
+	this.errors = [];
 }
 Question.prototype.validateAndShowErrors = function(showNewErrors) {
 	this.errors = [];
@@ -408,9 +409,9 @@ Page.getVisibleClassesAsArray = function() {
 		return o[1];
 	})
 }
-Page.prototype.hideErrors = function() {
+Page.prototype.clearErrors = function() {
 	this.questions.forEach((q) => {
-		q.hideErrors();
+		q.clearErrors();
 	})
 }
 Page.prototype.render = function() {
@@ -453,8 +454,8 @@ Page.prototype.linkQuestionsToTriggers = function(survey) {
 	}, this);
 }
 Page.prototype.hideQuestion = function(q) {
-	q.hideErrors();
 	$(q.containerSelector).remove();
+	q.clearErrors();
 }
 Page.prototype.showQuestion = function(q) {
 	var prevElm = undefined;
@@ -599,10 +600,8 @@ Survey.prototype.render = function() {
 	});
 
 	$("#prev-btn").click(() => {
-		this.getCurrentPage().hideErrors();
-		setTimeout(() => {
-			this.goToPrevPage();
-		}, 1000);
+		this.getCurrentPage().clearErrors();
+		this.goToPrevPage();
 	})
 	if (this.pages[this.currentPageIdx].nextVisibleIf()) {
 		$("#next-btn").click((e) => {
