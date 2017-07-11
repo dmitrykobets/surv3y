@@ -1,7 +1,7 @@
 var variables = {};
 
 class Question {
-	constructor ({name, type, visibleIf = true, disabledIf = false, title, isRequired, dropdownOptions = [], checkboxOptions = [], radioOptions=[], html="", radioVertical=false, checkboxVertical=true}) {
+	constructor ({name, type, visibleIf = true, disabledIf = false, title, isRequired, dropdownOptions = [], checkboxOptions = [], radioOptions=[], html="", radioVertical=false}) {
 		this.name = name;
 		if (!variables.hasOwnProperty(name)) {
 			variables[name] = Question.getDefaultValueForType(type);		
@@ -59,7 +59,6 @@ class Question {
 		this.checkboxSelectorPrefix = "#" + this.checkboxIdPrefix;
 		this.checkboxLabelIdPrefix = this.inputId + "_cl_";
 		this.checkboxLabelSelectorPrefix = "#" + this.checkboxLabelIdPrefix;
-		this.checkboxVertical = checkboxVertical;
 
 		// RADIO GROUP
 		this.radioOptions = radioOptions;
@@ -145,14 +144,10 @@ Question.prototype.generateCheckboxgroupHTML = function() {
 	const errorsHTML = this.renderErrors(false);
 	var inputHTML = "<div id='" + this.inputId + "'>"
 	this.checkboxOptions.forEach((o) => {
-		if (this.checkboxVertical) {
-			inputHTML += "<div>";
-		}
+		inputHTML += "<label>";
 		inputHTML += "<input id='" + this.checkboxIdPrefix + o.value + "' type='checkbox' value='" + o.value + "'" + (this.disabledIf() ? " disabled" : "") + "/>";
-		inputHTML += "<label id='" + this.checkboxLabelIdPrefix + o.value + "'>" + o.text + "</label>";
-		if (this.checkboxVertical) {
-			inputHTML += "</div>";
-		}
+		inputHTML += "<span id='" + this.checkboxLabelIdPrefix + o.value + "'>" + o.text + "</span>";
+		inputHTML += "</label>";
 	});
 	inputHTML += "</div>"
 	const HTML = "<div id='" + this.containerId +  "'>" + titleHTML + errorsHTML + inputHTML + "</div>";
@@ -640,7 +635,7 @@ var pages = [
 				name: "introText",
 				type: Question.Types.HTML,
 				html: "<h1>HI THERE</h1>"
-			})
+			}),
 		]
 	}),
 	new Page({
@@ -649,6 +644,25 @@ var pages = [
 				name: "disclaimer",
 				type: Question.Types.HTML,
 				html: "<h1>Disclaimer</h1><p>Some text</p>"
+			}),
+			new Question({
+				name: "testdelme",
+				type: Question.Types.CHECKBOXGROUP,
+				checkboxOptions: [
+					{value: "hi", text: "Hi there long text"},
+					{value: "bye", text: "more text"},
+					{value: "there", text: "a"},
+				],
+			}),
+			new Question({
+				name: "asdf",
+				type: Question.Types.RADIOGROUP,
+				radioOptions: [
+					{value: "hi", text: "Hi there long text"},
+					{value: "bye", text: "more text"},
+					{value: "there", text: "a"},
+				],
+				radioVertical: false,
 			})
 		]
 	}),
