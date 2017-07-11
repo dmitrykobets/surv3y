@@ -38,6 +38,9 @@ class Question {
 			case Question.Types.HTML:
 				this.inputId = this.containerId + "_h";
 				break;
+			case Question.Types.DATE:
+				this.inputId = this.containerId + "_i";
+				break;
 			default:
 				throw Error("Unsupported question type");
 		};
@@ -72,7 +75,7 @@ class Question {
 		this.html = html;
 	}
 }
-Question.Types = {TEXT: 0, NUMBER: 1, CHECKBOX: 2, DROPDOWN: 3, CHECKBOXGROUP: 4, RADIOGROUP: 5, HTML: 6};
+Question.Types = {TEXT: 0, NUMBER: 1, CHECKBOX: 2, DROPDOWN: 3, CHECKBOXGROUP: 4, RADIOGROUP: 5, HTML: 6, DATE: 7};
 Question.prototype.getErrorId = function(e, i = -1) {
 	if (i === -1) {
 		i = this.errors.indexOf(e);
@@ -99,6 +102,8 @@ Question.prototype.generateHTML = function() {
 		case Question.Types.HTML:
 			const html = "<div id='" + this.containerId + "'>" + this.html + "</div>";
 			return html;
+		case Question.Types.DATE:
+			return this.generateDateHTML();
 		default:
 			throw Error("Unsupported question type");
 	}
@@ -173,6 +178,14 @@ Question.prototype.generateRadiogroupHTML = function() {
 
 	return HTML;
 }
+Question.prototype.generateDateHTML = function() {
+	const titleHTML = "<div id='" + this.titleId + "'>" + this.title + "</div>";
+	const errorsHTML = this.renderErrors(false);
+	const inputHTML = "<input id='" + this.inputId + "' type='date'" + (this.disabledIf() ? " disabled" : "") + "/>";
+	const HTML = "<div id='" + this.containerId +  "'>" + titleHTML + errorsHTML + inputHTML + "</div>";
+
+	return HTML;
+}
 Question.getDefaultValueForType = function (type) {
 	switch (type) {
 		case Question.Types.TEXT:
@@ -190,6 +203,8 @@ Question.getDefaultValueForType = function (type) {
 		case Question.Types.RADIO:
 			return false;
 		case Question.Types.HTML:
+			return "";
+		case Question.Types.DATE:
 			return "";
 		default:
 			throw Error("Unsupported question type");
@@ -222,6 +237,13 @@ Question.prototype.setDefaultValue = function () {
 				defVal = variables[this.name];
 			}
 			$(this.inputSelector).prop('checked', defVal);
+			break;
+		case Question.Types.DATE:
+			var defVal = Question.getDefaultValueForType(this.type);
+			if (variables.hasOwnProperty(this.name)) {
+				defVal = moment(variables[this.name]).format("YYYY-MM-DD");
+			}
+			$(this.inputSelector).val(defVal);
 			break;
 		default:
 			var defVal = Question.getDefaultValueForType(this.type);
@@ -308,6 +330,9 @@ Question.prototype.setVariable = function(checkboxName = undefined) {
 		case Question.Types.RADIOGROUP:
 			variables[this.name] = $("[name='" + this.name + "']:checked").val();
 			break;
+		case Question.Types.DATE:
+			variables[this.name] = moment($(this.inputSelector).val());
+			break;
 		default:
 			throw Error("Unsupported question type");
 	}
@@ -339,15 +364,10 @@ Question.prototype.setOnChange = function() {
 }
 Question.prototype.disable = function() {
 	switch (this.type) {
+		case Question.Types.DATE:
 		case Question.Types.TEXT:
-			$(this.inputSelector).prop('disabled', true);
-			break;
 		case Question.Types.NUMBER:
-			$(this.inputSelector).prop('disabled', true);
-			break;
 		case Question.Types.CHECKBOX:
-			$(this.inputSelector).prop('disabled', true);
-			break;
 		case Question.Types.DROPDOWN:
 			$(this.inputSelector).prop('disabled', true);
 			break;
@@ -367,15 +387,10 @@ Question.prototype.disable = function() {
 }
 Question.prototype.enable = function() {
 	switch (this.type) {
+		case Question.Types.DATE:
 		case Question.Types.TEXT:
-			$(this.inputSelector).prop('disabled', false);
-			break;
 		case Question.Types.NUMBER:
-			$(this.inputSelector).prop('disabled', false);
-			break;
 		case Question.Types.CHECKBOX:
-			$(this.inputSelector).prop('disabled', false);
-			break;
 		case Question.Types.DROPDOWN:
 			$(this.inputSelector).prop('disabled', false);
 			break;
@@ -733,9 +748,9 @@ var pages = [
 		visibleIf: function() {return variables["isPregnancyTestPositive"] === "true"},
 		questions: [
 			new Question({
-				name: "periodDate",
-				type: Question.Types.NUMBER,
-				title: "Period duration ago in days",
+				name: "menstrualDate",
+				type: Question.Types.DATE,
+				title: "Period thing",
 				disabledIf: function() {return variables["dontKnowMenstrual"]},
 				isRequired: true,
 			}),
