@@ -1,7 +1,7 @@
 var variables = {};
 
 class Question {
-	constructor ({name, type, visibleIf = true, disabledIf = false, title, isRequired, dropdownOptions = [], checkboxOptions = [], radioOptions=[], html=""}) {
+	constructor ({name, type, visibleIf = true, disabledIf = false, title, isRequired, dropdownOptions = [], checkboxOptions = [], radioOptions=[], html="", radioVertical=false}) {
 		this.name = name;
 		if (!variables.hasOwnProperty(name)) {
 			variables[name] = Question.getDefaultValueForType(type);		
@@ -66,6 +66,7 @@ class Question {
 		this.radioLabelIdPrefix = this.inputId + "_rl_";
 		this.radioSelectorPrefix = "#" + this.radioIdPrefix;
 		this.radioLabelSelectorPrefix = "#" + this.radioLabelIdPrefix;
+		this.radioVertical = radioVertical;
 
 		// HTML
 		this.html = html;
@@ -154,10 +155,16 @@ Question.prototype.generateCheckboxgroupHTML = function() {
 Question.prototype.generateRadiogroupHTML = function() {
 	const titleHTML = "<div id='" + this.titleId + "'>" + this.title + "</div>";
 	const errorsHTML = this.renderErrors(false);
-	var inputHTML = "<div id='" + this.inputId + "'>"
+	var inputHTML = "<div id='" + this.inputId + "'>";
 	this.radioOptions.forEach((o) => {
+		if (this.radioVertical) {
+			inputHTML += "<div>"
+		}
 		inputHTML += "<input id='" + this.radioIdPrefix + o.value + "' name='" + this.name + "' type='radio' value='" + o.value + "'" + (this.disabledIf() ? " disabled" : "") + "/>";
-		inputHTML += "<div id='" + this.radioLabelIdPrefix + o.value + "'>" + o.text + "</div>";
+		inputHTML += "<label id='" + this.radioLabelIdPrefix + o.value + "'>" + o.text + "</label>";
+		if (this.radioVertical) {
+			inputHTML += "</div>"
+		}
 	});
 	inputHTML += "</div>"
 	const HTML = "<div id='" + this.containerId +  "'>" + titleHTML + errorsHTML + inputHTML + "</div>";
@@ -703,7 +710,8 @@ var pages = [
 					{ value: "true", text: "Yes" },
 					{ value: "false", text: "No" },
 				],
-				isRequired: true
+				isRequired: true,
+				radioVertical: false,
 			})
 		]
 	}),
@@ -749,6 +757,7 @@ var pages = [
 					{ value: "false", text: "No" },
 				],
 				isRequired: true,
+				radioVertical: false,
 			}),
 			new Question({
 				name: "ultrasoundDate",
@@ -859,6 +868,7 @@ var pages = [
 				],
 				type: Question.Types.RADIOGROUP,
 				isRequired: true,
+				radioVertical: false,
 			}),
 			new Question({
 				name: "medicalVsSurgicalDifferences",
@@ -882,6 +892,7 @@ var pages = [
 				],
 				type: Question.Types.RADIOGROUP,
 				isRequired: true,
+				radioVertical: false,
 			}),
 			new Question({
 				name: "requireSaturday",
@@ -892,6 +903,7 @@ var pages = [
 				],
 				type: Question.Types.RADIOGROUP,
 				isRequired: true,
+				radioVertical: false,
 			}),
 			new Question({
 				name: "supportPersonRol",
