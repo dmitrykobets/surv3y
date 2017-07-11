@@ -124,7 +124,7 @@ Question.prototype.generateCheckboxHTML = function() {
 	const titleHTML = "<div id='" + this.titleId + "'>" + this.title + "</div>";
 	const errorsHTML = this.renderErrors(false);
 	const inputHTML = "<input id='" + this.inputId + "' type='checkbox'" + (this.disabledIf() ? " disabled" : "") + "/>";
-	const HTML = "<div id='" + this.containerId +  "'>" + titleHTML + errorsHTML + inputHTML + "</div>";
+	const HTML = "<div id='" + this.containerId +  "'><label>" + titleHTML + errorsHTML + inputHTML + "</label></div>";
 
 	return HTML;
 }
