@@ -1,7 +1,7 @@
 var variables = {};
 
 class Question {
-	constructor ({name, type, visibleIf = true, disabledIf = false, title, isRequired, dropdownOptions = [], checkboxOptions = [], radioOptions=[], html="", radioVertical=false}) {
+	constructor ({name, type, visibleIf = true, disabledIf = false, title, isRequired, dropdownOptions = [], checkboxOptions = [], radioOptions=[], html="", radioVertical=false, checkboxVertical=true}) {
 		this.name = name;
 		if (!variables.hasOwnProperty(name)) {
 			variables[name] = Question.getDefaultValueForType(type);		
@@ -59,6 +59,7 @@ class Question {
 		this.checkboxSelectorPrefix = "#" + this.checkboxIdPrefix;
 		this.checkboxLabelIdPrefix = this.inputId + "_cl_";
 		this.checkboxLabelSelectorPrefix = "#" + this.checkboxLabelIdPrefix;
+		this.checkboxVertical = checkboxVertical;
 
 		// RADIO GROUP
 		this.radioOptions = radioOptions;
@@ -144,8 +145,14 @@ Question.prototype.generateCheckboxgroupHTML = function() {
 	const errorsHTML = this.renderErrors(false);
 	var inputHTML = "<div id='" + this.inputId + "'>"
 	this.checkboxOptions.forEach((o) => {
+		if (this.checkboxVertical) {
+			inputHTML += "<div>";
+		}
 		inputHTML += "<input id='" + this.checkboxIdPrefix + o.value + "' type='checkbox' value='" + o.value + "'" + (this.disabledIf() ? " disabled" : "") + "/>";
-		inputHTML += "<div id='" + this.checkboxLabelIdPrefix + o.value + "'>" + o.text + "</div>";
+		inputHTML += "<label id='" + this.checkboxLabelIdPrefix + o.value + "'>" + o.text + "</label>";
+		if (this.checkboxVertical) {
+			inputHTML += "</div>";
+		}
 	});
 	inputHTML += "</div>"
 	const HTML = "<div id='" + this.containerId +  "'>" + titleHTML + errorsHTML + inputHTML + "</div>";
