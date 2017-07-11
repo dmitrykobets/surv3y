@@ -8,3 +8,11 @@
 .shore-logo {
     margin-top: 1rem;
 }
+
+.radio-vertical {
+    display: block !important;
+}
+.radio-horizontal {
+    display: inline !important;
+    margin-right: 10px; /* figure out a way to remove this */
+}

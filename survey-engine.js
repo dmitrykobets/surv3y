@@ -160,13 +160,13 @@ Question.prototype.generateRadiogroupHTML = function() {
 	var inputHTML = "<div id='" + this.inputId + "'>";
 	this.radioOptions.forEach((o) => {
 		if (this.radioVertical) {
-			inputHTML += "<div>"
+			inputHTML += "<label class='radio-vertical'>";
+		} else {
+			inputHTML += "<label class='radio-horizontal'>";
 		}
 		inputHTML += "<input id='" + this.radioIdPrefix + o.value + "' name='" + this.name + "' type='radio' value='" + o.value + "'" + (this.disabledIf() ? " disabled" : "") + "/>";
-		inputHTML += "<label id='" + this.radioLabelIdPrefix + o.value + "'>" + o.text + "</label>";
-		if (this.radioVertical) {
-			inputHTML += "</div>"
-		}
+		inputHTML += "<span id='" + this.radioLabelIdPrefix + o.value + "'> " + o.text + "</span>";
+		inputHTML += "</label>";
 	});
 	inputHTML += "</div>"
 	const HTML = "<div id='" + this.containerId +  "'>" + titleHTML + errorsHTML + inputHTML + "</div>";
@@ -645,25 +645,6 @@ var pages = [
 				type: Question.Types.HTML,
 				html: "<h1>Disclaimer</h1><p>Some text</p>"
 			}),
-			new Question({
-				name: "testdelme",
-				type: Question.Types.CHECKBOXGROUP,
-				checkboxOptions: [
-					{value: "hi", text: "Hi there long text"},
-					{value: "bye", text: "more text"},
-					{value: "there", text: "a"},
-				],
-			}),
-			new Question({
-				name: "asdf",
-				type: Question.Types.RADIOGROUP,
-				radioOptions: [
-					{value: "hi", text: "Hi there long text"},
-					{value: "bye", text: "more text"},
-					{value: "there", text: "a"},
-				],
-				radioVertical: false,
-			})
 		]
 	}),
 	new Page({
