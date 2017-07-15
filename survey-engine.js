@@ -1,7 +1,7 @@
 variables = {}
 
 class SingularError {
-	constructor({name, questionNames=[], message, visibleIf}) {
+	constructor({name, message, visibleIf, appearOnChange=true}) {
 		this.name = name;
 		this.message = message;
 		if (!isFunction(visibleIf)) {
@@ -9,7 +9,8 @@ class SingularError {
 		}
 		this.visibleIf = visibleIf;
 
-		this.questionNames = questionNames;
+		this.appearOnChange = appearOnChange;
+
 		this.questions = [];
 		this.id = name;
 		this.selector = "#" + this.id;
@@ -20,8 +21,8 @@ SingularError.prototype.render = function() {
 	var HTML = "<div id='" + this.id + "' hidden>" + this.message + "</div>";
 	return HTML;
 }
-SingularError.prototype.setVisibility = function() {
-	var shouldBeVisible = this.visibleIf();
+SingularError.prototype.setVisibility = function(onChange) {
+	var shouldBeVisible = this.visibleIf() && (this.appearOnChange === onChange);
 	this.questions.forEach((q) => {
 		if (q.disabled) {
 			shouldBeVisible = false;
@@ -97,7 +98,7 @@ class Question {
 						this.disabled = false;
 					}
 					this.errors.forEach((e) => {
-						e.setVisibility();
+						e.setVisibility(true);
 					})
 				}
 				this.visible = true;
@@ -113,7 +114,7 @@ class Question {
 						this.disabled = false; // might want to refactor this
 					}
 					this.errors.forEach((e) => {
-						e.setVisibility();
+						e.setVisibility(true);
 					})
 				}
 				this.linkToVariable = function() {
@@ -164,7 +165,7 @@ class Question {
 						$(this.inputSelector).keydown(debounce(
 							() => {
 								this.errors.forEach((e) => {
-									e.setVisibility();
+									e.setVisibility(true);
 								})
 							}, 250
 						));
@@ -207,10 +208,14 @@ class Page {
 			}
 		})
 
+		const varRegex = /variables\["(.+?)"\]/g;
 		this.errors.forEach((e) => {
-			e.questionNames.forEach((qn) => {
-				e.questions.push(this.findQuestionByName(qn))
-			})
+			const fString = e.visibleIf.toString();	
+			var match = varRegex.exec(fString);
+			while (match != null) {
+				e.questions.push(this.findQuestionByName(match[1]));
+				match = varRegex.exec(fString);
+			}
 		})
 
 		this.visibleIf = isFunction(visibleIf) ? visibleIf : function() {return visibleIf};
@@ -235,7 +240,7 @@ Page.prototype.render = function(containerJQuery) {
 	})
 
 	this.errors.forEach((e) => {
-		e.setVisibility();
+		e.setVisibility(false);
 	})
 }
 Page.prototype.makeQuestionVisible = function(question) {
@@ -323,7 +328,6 @@ const surveyJSON = {
 					name: "e1",
 					message: "error",
 					visibleIf: function() {return variables["d"] === ""},
-					questionNames: ["d"]
 				}),
 				new Question({
 					type: Question.Types.TEXT,
