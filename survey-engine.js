@@ -22,7 +22,7 @@ SingularError.prototype.render = function() {
 	return HTML;
 }
 SingularError.prototype.setVisibility = function(onChange) {
-	var shouldBeVisible = this.visibleIf() && (this.appearOnChange === onChange);
+	var shouldBeVisible = this.visibleIf() && (this.appearOnChange === true || onChange === false);
 	this.questions.forEach((q) => {
 		if (q.disabled) {
 			shouldBeVisible = false;
@@ -40,11 +40,23 @@ SingularError.prototype.setVisibility = function(onChange) {
 	}
 }
 class TemplateError {
-	constructor({}) {}
+	constructor({name, message, appearOnChange=true, visibleIfFuncStrings={}, questionName}) {
+		this.name = name;
+		this.message = message;
+		this.appearOnChange = appearOnChange;
+		this.questionName = questionName;
+		this.visibleIfFuncStrings = visibleIfFuncStrings;
+	}
+}
+class SingularTemplateError {
+	constructor({templateName, questionName}) {
+		this.templateName = templateName;
+		this.questionName = questionName;
+	}
 }
 
 class Question {
-	constructor ({type, name, visibleIf=true, placeholder, defaultValue, disabledIf=false}) {
+	constructor ({type, name, visibleIf=true, placeholder, defaultValue, disabledIf=false, isRequired=false}) {
 		if (type === undefined) {
 			throw Error("Question missing type");
 		}
@@ -64,6 +76,7 @@ class Question {
 
 		switch (this.type) {
 			case Question.Types.TEXT:
+				this.isRequired = isRequired;
 				this.generateSkeletonHTML = function() {
 					var HTML = "<input id='" + this.inputId + "' type='text'/>"
 					return HTML;
@@ -176,7 +189,7 @@ class Question {
 	}
 }
 Question.Types = {
-	TEXT: 0,
+	TEXT: "TEXT",
 }
 
 Question.prototype.render = function() {
@@ -197,26 +210,64 @@ Question.prototype.setProperties = function() {
 
 class Page {
 	constructor({elements=[], visibleIf=true}) {
+		this.errorsInitialized = false;
 		this.questions = [];
 		this.errors = [];
 		this.elements = elements;
-		this.elements.forEach((elm) => {
+		var templateSingularsToConvertIndices = [];
+		var i = 0;
+		while (i < this.elements.length) {
+			const elm = this.elements[i];
 			if (elm.constructor.name === "Question") {
+				/* -- high priority template registration */
+				if (elm.isRequired === true) {
+					this.elements.splice(i, 0, new SingularTemplateError ({
+						templateName: "required",
+						questionName: elm.name,
+					}));
+					templateSingularsToConvertIndices.push({elmIdx: i, errIdx: this.errors.length});
+				}
 				this.questions.push(elm);
+				i ++;
 			} else if (elm.constructor.name === "SingularError") {
 				this.errors.push(elm);
+			} else if (elm.constructor.name === "SingularTemplateError") {
+				templateSingularsToConvertIndices.push({elmIdx: i, errIdx: this.errors.length});
 			}
-		})
+			i ++;
+		}
 
-		const varRegex = /variables\["(.+?)"\]/g;
-		this.errors.forEach((e) => {
-			const fString = e.visibleIf.toString();	
-			var match = varRegex.exec(fString);
-			while (match != null) {
-				e.questions.push(this.findQuestionByName(match[1]));
-				match = varRegex.exec(fString);
-			}
-		})
+		this.initializeErrors = function(templates) {
+			templateSingularsToConvertIndices.forEach((indices) => {
+				const templateSingular = this.elements[indices.elmIdx];
+				const template = templates.find((temp) => {return temp.name === templateSingular.templateName});
+				const linkedQuestion = this.findQuestionByName(templateSingular.questionName);
+
+				var visibleIfFuncString = template.visibleIfFuncStrings[linkedQuestion.type];
+				visibleIfFuncString = visibleIfFuncString.replace("variables[]", 'variables["' + linkedQuestion.name + '"]');
+
+				this.errors.splice(indices.errIdx, 0, new SingularError({
+					name: templateSingular.templateName + templateSingular.questionName,
+					message: template.message,
+					visibleIf: eval("(" + visibleIfFuncString + ")"),
+					appearOnChange: template.appearOnChange,
+				}))
+				this.elements[indices.elmIdx] = this.errors[indices.errIdx]
+			})
+
+			// push questions each error depends on in terms of state (visible/disabled)
+			const varRegex = /variables\["(.+?)"\]/g;
+			this.errors.forEach((e) => {
+				const fString = e.visibleIf.toString();	
+				var match = varRegex.exec(fString);
+				while (match != null) {
+					e.questions.push(this.findQuestionByName(match[1]));
+					match = varRegex.exec(fString);
+				}
+			})
+
+			this.errorsInitialized = true;
+		}
 
 		this.visibleIf = isFunction(visibleIf) ? visibleIf : function() {return visibleIf};
 	}
@@ -269,14 +320,18 @@ Page.prototype.findQuestionByName = function(qName) {
 }
 
 class Survey {
-	constructor({pages=[]}) {
+	constructor({pages=[], templateErrors=[]}) {
 		this.pages = pages;
+		this.templateErrors = templateErrors;
 	}
 }
 Survey.prototype.render = function(containerJQuery) {
 	const page = this.pages.find((p) => {
 		return p.visibleIf();
 	})
+	if (page.errorsInitialized === false) {
+		page.initializeErrors(this.templateErrors);
+	}
 	page.render(containerJQuery);
 }
 
@@ -312,17 +367,34 @@ $(document).ready(function() {
 
 
 
+//	constructor({name, message, appearOnChange=true, visibleIfFuncs={}}) {
 /// SURVEY
 const surveyJSON = {
+	templateErrors: [
+		new TemplateError({
+			name: "required",
+			message: "Missing required field",
+			appearOnChange: true,
+			visibleIfFuncStrings: {
+				[Question.Types.TEXT]: 'function() {return variables[] === ""}',
+			}
+		})
+	],
 	pages: [
 		new Page({
 			elements: [
+				/*
+				new SingularTemplateError ({
+					templateName: "required",
+					questionName: "hi",
+				}),*/
 				new Question({
 					type: Question.Types.TEXT,
 					placeholder: "hi",
 					visibleIf: function() {return variables["d"] !== "bye"},
 
 					name: "hi",
+					isRequired: true,
 				}),
 				new SingularError({
 					name: "e1",
