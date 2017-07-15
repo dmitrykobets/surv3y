@@ -1,7 +1,7 @@
 var variables = {};
 
 class Question {
-	constructor ({name, type, visibleIf = true, disabledIf = false, title, isRequired, dropdownOptions = [], checkboxOptions = [], radioOptions=[], html="", radioVertical=false}) {
+	constructor ({name, type, visibleIf = true, disabledIf = false, title, isRequired, validatorNames = [], dropdownOptions = [], checkboxOptions = [], radioOptions=[], html="", radioVertical=false}) {
 		this.name = name;
 		if (!variables.hasOwnProperty(name)) {
 			variables[name] = Question.getDefaultValueForType(type);		
@@ -52,6 +52,7 @@ class Question {
 
 		this.errors = [];
 		this.isRequired = isRequired;
+		this.validatorNames = validatorNames;
 
 		// DROPDOWN
 		this.dropdownOptions = dropdownOptions;
@@ -76,6 +77,7 @@ class Question {
 	}
 }
 Question.Types = {TEXT: 0, NUMBER: 1, CHECKBOX: 2, DROPDOWN: 3, CHECKBOXGROUP: 4, RADIOGROUP: 5, HTML: 6, DATE: 7};
+Question.Validators = {NEGATIVENUMBER: 0, FUTUREDATE: 1};
 Question.prototype.getErrorId = function(e, i = -1) {
 	if (i === -1) {
 		i = this.errors.indexOf(e);
@@ -277,18 +279,48 @@ Question.prototype.clearErrors = function() {
 	$(this.errorsSelector).empty();
 	this.errors = [];
 }
-Question.prototype.validateAndShowErrors = function(showNewErrors) {
+Question.prototype.validateAndShowErrors = function(showRequiredErrors) {
 	this.errors = [];
 	var noErrors = true;
 	if (this.visibleIf()) {
-		if (!this.validateRequired(showNewErrors)) {
+		if (!this.validateRequired(showRequiredErrors)) {
+			noErrors = false;
+		}
+		if (!this.validateCustom()) {
 			noErrors = false;
 		}
 	}
 	this.renderErrors(true);	
 	return noErrors;
 }
-Question.prototype.validateRequired = function(showNewErrors) {
+Question.prototype.validateCustom = function() {
+	if (this.disabledIf() || this.validatorNames.length === 0) return true;
+	var passedTest = true;
+	this.validatorNames.forEach((v) => {
+		switch (v) {
+			case Question.Validators.NEGATIVENUMBER:
+				if (this.type !== Question.Types.NUMBER) {
+					throw Error("invalid type for number validator");
+				}
+				if (variables[this.name] < 0) {
+					passedTest = false;
+					this.errors.push("Input must not be negative");
+				}
+				break;
+			case Question.Validators.FUTUREDATE:
+				if (this.type !== Question.Types.DATE) {
+					throw Error("invalid type for date validator");
+				}
+				if (moment(variables[this.name]).isAfter(moment())) {
+					passedTest = false;
+					this.errors.push("Date must not be in the future");
+				}
+				break;
+		}
+	});
+	return passedTest;
+}
+Question.prototype.validateRequired = function(showRequiredErrors) {
 	if (!this.isRequired || this.disabledIf() || this.type === Question.Types.HTML) return true;
 	var passedTest = false;
 	switch (this.type) {
@@ -305,7 +337,7 @@ Question.prototype.validateRequired = function(showNewErrors) {
 		default:
 			passedTest = !!$(this.inputSelector).val();
 	}
-	if (!passedTest && showNewErrors) {
+	if (!passedTest && showRequiredErrors) {
 		this.errors.push("Missing required field");
 	}
 	return passedTest;
@@ -355,11 +387,19 @@ Question.prototype.setOnChange = function() {
 				})
 			});
 			break;
-		default:
+		case Question.Types.DROPDOWN:
+		case Question.Types.CHECKBOX:
 			$(this.inputSelector).change(() => {
 				this.setVariable();
 				this.validateAndShowErrors(false);
-			});
+			})
+		default:
+			$(this.inputSelector).keypress(debounce(
+				() => {
+					this.setVariable();
+					this.validateAndShowErrors(false);
+				}, 250
+			));
 	}
 }
 Question.prototype.disable = function() {
@@ -407,17 +447,21 @@ Question.prototype.enable = function() {
 		default:
 			throw Error("Unsupported question type");
 	}
+	this.validateAndShowErrors(false);
 }
 
 
 class Page {
-	constructor ({pageClass = "", visibleIf = true, questions, nextVisibleIf = true}) {
+	constructor ({pageClass = "", visibleIf = true, questions, nextVisibleIf = true, nextButtonText = undefined, prevButtonText = undefined}) {
 		this.pageClass = pageClass;
 		this.visibleIf = isFunction(visibleIf) ? visibleIf : function() {return visibleIf};
 		this.questions = questions;
 		this.containerId = "page";
 		this.containerSelector = "#" + this.containerId;
 		this.nextVisibleIf = isFunction(nextVisibleIf) ? nextVisibleIf : function() {return nextVisibleIf};
+
+		this.customNextButtonText = nextButtonText;
+		this.customPrevButtonText = prevButtonText;
 	}
 }
 Page.globalClassRules = [];
@@ -441,7 +485,6 @@ Page.prototype.clearErrors = function() {
 Page.prototype.render = function() {
 	var html = "";
 	const classes = Page.getVisibleClassesAsArray();
-	console.log("class; " + this.pageClass + " classes: " + classes)
 	if (classes.length !== 0) {
 		html += "<div id='page' class='" + classes.join(" ") + "'>";
 	} else {
@@ -495,6 +538,7 @@ Page.prototype.showQuestion = function(q) {
 		prevElm.append(q.render());
 	}
 
+	q.validateAndShowErrors(false);
 	q.setDefaultValue();
 	q.setOnChange();
 	$(q.inputSelector).change(() => {
@@ -535,10 +579,10 @@ Page.prototype.findQuestionIndexByName = function(name) {
 Page.prototype.findQuestionIndex = function(q) {
 	return this.questions.indexOf(q);
 }
-Page.prototype.runValidators = function() {
+Page.prototype.runValidators = function(showRequiredErrors) {
 	var noErrors = true;
 	this.questions.forEach(function(q) {
-		if (!q.validateAndShowErrors(true)) {
+		if (!q.validateAndShowErrors(showRequiredErrors)) {
 			noErrors = false;
 		}
 	});
@@ -555,7 +599,29 @@ class Survey {
 		this.currentPageIdx = 0;
 		this.defaultButtonClasses = [];
 		this.defaultNavClasses = [];
+
+		this.onComplete = function() {};
+		this.defaultNextButtonText = "Next";
+		this.defaultPrevButtonText = "Previous";
 	}
+}
+Survey.prototype.setDefaultNextButtonText = function(text) {
+	this.defaultNextButtonText = text;
+}
+Survey.prototype.getNextButtonText = function() {
+	if (this.getCurrentPage().customNextButtonText !== undefined) {
+		return this.getCurrentPage().customNextButtonText;
+	}
+	return this.defaultNextButtonText;
+}
+Survey.prototype.setDefaultPrevButtonText = function(text) {
+	this.defaultPrevButtonText = text;
+}
+Survey.prototype.getPrevButtonText = function() {
+	if (this.getCurrentPage().customPrevButtonText !== undefined) {
+		return this.getCurrentPage().customPrevButtonText;
+	}
+	return this.defaultPrevButtonText;
 }
 Survey.prototype.getCurrentPage = function() {
 	return this.pages[this.currentPageIdx];
@@ -567,19 +633,21 @@ Survey.prototype.addDefaultNavClass = function(navClass) {
 	this.defaultNavClasses.push(navClass);
 }
 Survey.prototype.goToNextPage = function() {
+	const oldIdx = this.currentPageIdx;
 	const newPage = this.pages.find(function(p, i) {
 		if (i <= this.currentPageIdx) return false;
 		this.currentPageIdx ++;
 		return p.visibleIf();
 	}, this);
 	if (!newPage) {
-		this.renderDone();
+		this.currentPageIdx = oldIdx;
+		this.onComplete();
 	} else {
 		this.render();
 	}
 }
 Survey.prototype.attemptToGoToNextPage = function() {
-	const noErrors = this.getCurrentPage().runValidators();
+	const noErrors = this.getCurrentPage().runValidators(true);
 	if (noErrors) {
 		this.goToNextPage();
 	}
@@ -591,15 +659,13 @@ Survey.prototype.goToPrevPage = function() {
 		if (this.pages[i].visibleIf()) break;
 	}
 	if (this.currentPageIdx === -1) {
-		this.renderDone();
+		this.onComplete();
 	} else {
 		this.render();
 	}
 }
-Survey.prototype.renderDone = function() {
-	$(this.containerSelector).html("<div id='done'>Done</div>");
-}
 Survey.prototype.render = function() {
+	window.scrollTo(0, 0);
 	$(this.containerSelector).empty();
 	var html = "<div id='survey'>"
 		html += this.pages[this.currentPageIdx].render();
@@ -607,11 +673,11 @@ Survey.prototype.render = function() {
 
 	html += "<div id='survey-nav' class='" + this.defaultNavClasses.join(" ") + "'>";
 	if (this.currentPageIdx !== 0) {
-		html += "<input id='prev-btn' type='button' value='Previous' class='" + this.defaultButtonClasses.join(" ") + "'></input>";
+		html += "<input id='prev-btn' type='button' value='" + this.getPrevButtonText() + "' class='" + this.defaultButtonClasses.join(" ") + "'></input>";
 	}
 
 	if (this.pages[this.currentPageIdx].nextVisibleIf()) {
-		html += "<input id='next-btn' type='button' value='Next' class='" + this.defaultButtonClasses.join(" ") + "'></input>";
+		html += "<input id='next-btn' type='button' value='" + this.getNextButtonText() + "' class='" + this.defaultButtonClasses.join(" ") + "'></input>";
 	}
 	html += "</div>"; // close nav
 
@@ -632,342 +698,46 @@ Survey.prototype.render = function() {
 			this.attemptToGoToNextPage();
 		})
 	}
+	this.getCurrentPage().runValidators(false);
 }
-
-
+Survey.prototype.hide = function() {
+	$(this.containerSelector).empty();
+}
+Survey.prototype.isQuestionPartOfWorkflow = function(questionName) {
+	var foundAndVisible = false;
+	this.pages.forEach((p) => {
+		if (foundAndVisible) return;
+		const question = p.questions.find((q) => {
+			return q.name === questionName;
+		})
+		if (question) {
+			foundAndVisible = p.visibleIf() && question.visibleIf();
+		}
+	})
+	return foundAndVisible;
+}
 
 function isFunction(functionToCheck) {
 	var getType = {};
 	return functionToCheck && getType.toString.call(functionToCheck) === '[object Function]';
 }
 
-var pages = [
-	// main page
-	new Page({
-		pageClass: "centerText",
-		questions: [
-			new Question({
-				name: "introText",
-				type: Question.Types.HTML,
-				html: "<h1>HI THERE</h1>"
-			}),
-		]
-	}),
-	new Page({
-		questions: [
-			new Question({
-				name: "disclaimer",
-				type: Question.Types.HTML,
-				html: "<h1>Disclaimer</h1><p>Some text</p>"
-			}),
-		]
-	}),
-	new Page({
-		questions: [
-			new Question({
-				name: "gender",
-				type: Question.Types.TEXT,
-				title: "Your gender",
-				isRequired: true,
-			}),
-			new Question({
-				name: "age",
-				type: Question.Types.NUMBER,
-				title: "Your age",
-				isRequired: true,
-			}),
-			new Question({
-				name: "location",
-				type: Question.Types.DROPDOWN,
-				title: "Your location",
-				dropdownOptions: [
-					{ value: "cambridge", text: "Cambridge"},
-					{ value: "kitchener", text: "Kitchener"},
-					{ value: "guelph", text: "Guelph"},
-					{ value: "waterloo", text: "Waterloo"},
-					{ value: "other", text: "Other"},
-				],
-				isRequired: true,
-			}),
-			new Question({
-				name: "locationOther",
-				type: Question.Types.TEXT,
-				title: "Other location",
-				visibleIf: function() {return variables["location"] === "other"},
-				isRequired: true,
-			}),
-			new Question({
-				name: "hearAbout",
-				type: Question.Types.DROPDOWN,
-				title: "How did you hear about SHORE Centre",
-				dropdownOptions: [
-					{ value: "internet", text: "Internet"},
-					{ value: "healthcare", text: "A health care provider"},
-					{ value: "person", text: "Person"},
-					{ value: "other", text: "Other"},
-				],
-				isRequired: true,
-			}),
-			new Question({
-				name: "hearAboutOther",
-				type: Question.Types.TEXT,
-				title: "Other",
-				visibleIf: function() {return variables["hearAbout"] === "other"},
-				isRequired: true,
-			}),
-		]
-	}),
-	new Page({
-		questions: [
-			new Question({
-				name: "isPregnancyTestPositive",
-				type: Question.Types.RADIOGROUP,
-				title: "Have you taken a pregnancy test that was positive?",
-				radioOptions: [
-					{ value: "true", text: "Yes" },
-					{ value: "false", text: "No" },
-				],
-				isRequired: true,
-				radioVertical: false,
-			})
-		]
-	}),
-	new Page({
-		pageClass: "centerText",
-		visibleIf: function() {return variables["isPregnancyTestPositive"] === "false"},
-		questions: [
-			new Question({
-				name: "pregnancyReferral",
-				type: Question.Types.HTML,
-				html: "<h1>PREGNANCY TEST REFERRAL</h1><p>some clinics</p><ul><li>clinic1</li><li>clinic2</li></ul>",
-			})
-		],
-		nextVisibleIf: false,
-	}),
-	new Page({
-		visibleIf: function() {return variables["isPregnancyTestPositive"] === "true"},
-		questions: [
-			new Question({
-				name: "menstrualDate",
-				type: Question.Types.DATE,
-				title: "Period thing",
-				disabledIf: function() {return variables["dontKnowMenstrual"]},
-				isRequired: true,
-			}),
-			new Question({
-				name: "dontKnowMenstrual",
-				type: Question.Types.CHECKBOX,
-				title: "I don't know",
-			}),
-		]
-	}),
-	new Page({
-		visibleIf: function() {return variables["isPregnancyTestPositive"] === "true" &&
-									variables["dontKnowMenstrual"]},
-		questions: [
-			new Question({
-				name: "knowUltrasound",
-				type: Question.Types.RADIOGROUP,
-				title: "Have you had an ultrasound to date your pregnancy?",
-				radioOptions: [
-					{ value: "true", text: "Yes" },
-					{ value: "false", text: "No" },
-				],
-				isRequired: true,
-				radioVertical: false,
-			}),
-			new Question({
-				name: "ultrasoundDate",
-				type: Question.Types.NUMBER,
-				title: "Days since ultrasound",
-				visibleIf: function() {return variables["knowUltrasound"] === "true"},
-				disabledIf: function() {return variables["missingUltrasoundInfo"]},
-				isRequired: true,
-			}),
-			
-			new Question({
-				name: "ultrasoundWeeksDaysTitle",
-				type: Question.Types.HTML,
-				html: "<h4>What was the result, in weeks and days?</h4>",
-				visibleIf: function() {return variables["knowUltrasound"] === "true"},
-				isRequired: true,
-			}),
-			
-			new Question({
-				name: "ultrasoundWeeks",
-				title: "Weeks",
-				type: Question.Types.NUMBER,
-				visibleIf: function() {return variables["knowUltrasound"] === "true"},
-				disabledIf: function() {return variables["missingUltrasoundInfo"]},
-				isRequired: true,
-			}),
-			new Question({
-				name: "ultrasoundDays",
-				title: "Days",
-				type: Question.Types.NUMBER,
-				visibleIf: function() {return variables["knowUltrasound"] === "true"},
-				disabledIf: function() {return variables["missingUltrasoundInfo"]},
-				isRequired: true,
-			}),
-			new Question({
-				name: "missingUltrasoundInfo",
-				title: "I do not have this information",
-				type: Question.Types.CHECKBOX,
-				visibleIf: function() {return variables["knowUltrasound"] === "true"},
-			}),
-		]
-	}),
-	new Page({
-		pageClass: "centerText",
-		visibleIf: function() {return variables["missingUltrasoundInfo"] && variables["knowUltrasound"] === "true"},
-		questions: [
-			new Question({
-				name: "missingUltrasoundInfoPage",
-				type: Question.Types.HTML,
-				html: "<h1>Missing ultrasound info</h1><p>some stuff</p>",
-			})
-		],
-		nextVisibleIf: false,
-	}),
-	new Page({
-		pageClass: "centerText",
-		visibleIf: function() {return variables["knowUltrasound"] === "false"},
-		questions: [
-			new Question({
-				name: "ultrasoundReferral",
-				type: Question.Types.HTML,
-				html: "<h1>Ultrasound referral</h1><p>get an ultrasound!!!</p>",
-			})
-		],
-		nextVisibleIf: false,
-	}),
-	new Page({
-		pageClass: "centerText",
-		visibleIf: function() {return variables["knowUltrasound"] === "true" && !variables["missingUltrasoundInfo"] &&
-									(variables["ultrasoundDate"] + variables["ultrasoundWeeks"] + variables["ultrasoundDays"] >= 100)},
-		questions: [
-			new Question({
-				name: "weight",
-				type: Question.Types.HTML,
-				html: "<h1>TOO LONG FOR PREGNANCY!</h1>"
-			}),
-		]
-	}),
-	new Page({
-		visibleIf: function() {return variables["knowUltrasound"] === "true" && !variables["missingUltrasoundInfo"] &&
-									(variables["ultrasoundDate"] + variables["ultrasoundWeeks"] + variables["ultrasoundDays"] < 100)},
-		questions: [
-			new Question({
-				name: "weight",
-				title: "Your weight?",
-				type: Question.Types.NUMBER,
-				isRequired: true,
-			}),
-			new Question({
-				name: "height",
-				title: "Your height?",
-				type: Question.Types.NUMBER,
-				isRequired: true,
-			})
-		]
-	}),
-	new Page({
-		visibleIf: function() {return variables["knowUltrasound"] === "true" && !variables["missingUltrasoundInfo"] &&
-									(variables["ultrasoundDate"] + variables["ultrasoundWeeks"] + variables["ultrasoundDays"] < 100) &&
-									getBMI(variables["weight"], variables["height"]) < 40},
-		questions: [
-			new Question({
-				name: "preferSurgical",
-				title: "What type of abortion procedure would you prefer?",
-				radioOptions: [
-					{ value: "false", text: "Medication" },
-					{ value: "true", text: "Surgical" },
-				],
-				type: Question.Types.RADIOGROUP,
-				isRequired: true,
-				radioVertical: false,
-			}),
-			new Question({
-				name: "medicalVsSurgicalDifferences",
-				type: Question.Types.HTML,
-				html: "<a href='www.google.ca'>See the differences</a>"
-			})
-		]
-	}),
-	new Page({
-		visibleIf: function() {return variables["knowUltrasound"] === "true" && !variables["missingUltrasoundInfo"] &&
-									(variables["ultrasoundDate"] + variables["ultrasoundWeeks"] + variables["ultrasoundDays"] < 100) &&
-									getBMI(variables["weight"], variables["height"]) < 40 &&
-									(variables["preferSurgical"] === "true")},
-		questions: [
-			new Question({
-				name: "preferFemaleDoctor",
-				title: "Do you prefer to have a female doctor?",
-				radioOptions: [
-					{value: "true", text: "Yes"},
-					{value: "false", text: "Doesn't matter"},
-				],
-				type: Question.Types.RADIOGROUP,
-				isRequired: true,
-				radioVertical: false,
-			}),
-			new Question({
-				name: "requireSaturday",
-				title: "Do you require a Saturday appointment?",
-				radioOptions: [
-					{value: "true", text: "Yes"},
-					{value: "false", text: "No"},
-				],
-				type: Question.Types.RADIOGROUP,
-				isRequired: true,
-				radioVertical: false,
-			}),
-			new Question({
-				name: "supportPersonRol",
-				type: Question.Types.CHECKBOXGROUP,
-				title: "If you bring a support person, how would you like them to be involved?",
-				checkboxOptions: [
-					{value: "procedure", text: "Be in the procedure room with me"},
-					{value: "waiting", text: "Wait in the waiting room with me"},
-					{value: "both", text: "I don't have a preference"},
-				],
-				isRequired: true,
-			})
-		]
-	}),
-	new Page({
-		pageClass: "centerText",
-		visibleIf: function() {return variables["knowUltrasound"] === "true" && !variables["missingUltrasoundInfo"] &&
-									(variables["ultrasoundDate"] + variables["ultrasoundWeeks"] + variables["ultrasoundDays"] < 100)},
-		questions: [
-			new Question({
-				name: "referrals",
-				html: "<h1>Referrals</h1><p>here they are</p>",
-				type: Question.Types.HTML,
-			}),
-		],
-		nextVisibleIf: false,
-	}),
-];
-
-// main
-$(document).ready(function() {
-	survey = new Survey({containerId: "surveyContainer", pages: pages});
-	survey.addDefaultButtonClass(["button"]);
-	survey.addDefaultNavClass(["row small-11 medium-8 large-5 columns text-center"]);
-	Page.addGlobalClassRule([function() {return survey.getCurrentPage().pageClass === "centerText"}, "row small-11 medium-8 large-5 columns text-center"]);
-	Page.addGlobalClassRule([function() {return survey.getCurrentPage().pageClass !== "centerText"}, "row small-11 medium-8 large-5 columns"]);
-	survey.render();
-});
-
-
-// custom
-function getBMI(imperialWeight, imperialHeight) {
-    // Assumes that values provided are imperial units. Convert to metric.
-    var metricWeight = parseInt(imperialWeight) * .453592;
-    var metricHeight = parseInt(imperialHeight) * .0254;
-    
-    var theBMI = metricWeight / (metricHeight * metricHeight);
-    
-    return theBMI;
-}
+// Source: https://davidwalsh.name/javascript-debounce-function
+// Returns a function, that, as long as it continues to be invoked, will not
+// be triggered. The function will be called after it stops being called for
+// N milliseconds. If `immediate` is passed, trigger the function on the
+// leading edge, instead of the trailing.
+function debounce(func, wait, immediate) {
+	var timeout;
+	return function() {
+		var context = this, args = arguments;
+		var later = function() {
+			timeout = null;
+			if (!immediate) func.apply(context, args);
+		};
+		var callNow = immediate && !timeout;
+		clearTimeout(timeout);
+		timeout = setTimeout(later, wait);
+		if (callNow) func.apply(context, args);
+	};
+};
