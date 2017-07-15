@@ -1,5 +1,47 @@
 variables = {}
 
+class SingularError {
+	constructor({name, questionNames=[], message, visibleIf}) {
+		this.name = name;
+		this.message = message;
+		if (!isFunction(visibleIf)) {
+			throw Error ("Error visibility condition must be a function");
+		}
+		this.visibleIf = visibleIf;
+
+		this.questionNames = questionNames;
+		this.questions = [];
+		this.id = name;
+		this.selector = "#" + this.id;
+		this.visible = false;
+	}
+}
+SingularError.prototype.render = function() {
+	var HTML = "<div id='" + this.id + "' hidden>" + this.message + "</div>";
+	return HTML;
+}
+SingularError.prototype.setVisibility = function() {
+	var shouldBeVisible = this.visibleIf();
+	this.questions.forEach((q) => {
+		if (q.disabled) {
+			shouldBeVisible = false;
+		}
+		if (!q.visible) {
+			shouldBeVisible = false;
+		}
+	})
+	if (shouldBeVisible === true && this.visible === false) {
+		$(this.selector).show();
+		this.visible = true;
+	} else if (shouldBeVisible === false && this.visible === true) {
+		$(this.selector).hide();
+		this.visible = false;
+	}
+}
+class TemplateError {
+	constructor({}) {}
+}
+
 class Question {
 	constructor ({type, name, visibleIf=true, placeholder, defaultValue, disabledIf=false}) {
 		if (type === undefined) {
@@ -18,7 +60,6 @@ class Question {
 
 		this.inputId = "q_" + this.name + "_i";
 		this.inputSelector = "#" + this.inputId;
-
 
 		switch (this.type) {
 			case Question.Types.TEXT:
@@ -55,17 +96,25 @@ class Question {
 						$(this.inputSelector).prop('disabled', false);
 						this.disabled = false;
 					}
+					this.errors.forEach((e) => {
+						e.setVisibility();
+					})
 				}
 				this.visible = true;
 				this.setVisibility = function(page) {
 					if (this.visibleIf() === true && this.visible === false) {
-						page.makeQuestionVisible(this);
+						//page.makeQuestionVisible(this);
+						$(this.inputSelector).show();
 						this.visible = true;
 					} else if (this.visibleIf() === false && this.visible === true) {
-						$(this.inputSelector).remove();
+						//$(this.inputSelector).remove();
+						$(this.inputSelector).hide();
 						this.visible = false;
 						this.disabled = false; // might want to refactor this
 					}
+					this.errors.forEach((e) => {
+						e.setVisibility();
+					})
 				}
 				this.linkToVariable = function() {
 					$(this.inputSelector).keydown(debounce(
@@ -74,13 +123,14 @@ class Question {
 						}, 250
 					));
 				}
-				this.linkToDependants = function(page) {
-					this.visibilityDependants = [];
-					this.disabilityDependants = [];
+				this.visibilityDependants = [];
+				this.disabilityDependants = [];
+				this.linkToDependantQuestions = function(page) {
 					page.questions.forEach((q) => {
 						if (q.visibleIf.toString().includes('variables["' + this.name + '"]')) {
 							this.visibilityDependants.push(q.name);
-						} else if (q.disabledIf.toString().includes('variables["' + this.name + '"]')) {
+						} 
+						if (q.disabledIf.toString().includes('variables["' + this.name + '"]')) {
 							this.disabilityDependants.push(q.name);
 						}
 					});
@@ -98,6 +148,23 @@ class Question {
 							() => {
 								this.disabilityDependants.forEach((d) => {
 									page.questions.find((q) => {return q.name === d}).setDisability();
+								})
+							}, 250
+						));
+					}
+				}
+				this.errors = [];
+				this.linkToErrors = function(page) {
+					page.errors.forEach((e) => {
+						if (e.visibleIf.toString().includes('variables["' + this.name + '"]')) {
+							this.errors.push(e);
+						}
+					});
+					if (this.errors.length !== 0) {
+						$(this.inputSelector).keydown(debounce(
+							() => {
+								this.errors.forEach((e) => {
+									e.setVisibility();
 								})
 							}, 250
 						));
@@ -128,8 +195,24 @@ Question.prototype.setProperties = function() {
 }
 
 class Page {
-	constructor({questions=[], visibleIf=true}) {
-		this.questions = questions;
+	constructor({elements=[], visibleIf=true}) {
+		this.questions = [];
+		this.errors = [];
+		this.elements = elements;
+		this.elements.forEach((elm) => {
+			if (elm.constructor.name === "Question") {
+				this.questions.push(elm);
+			} else if (elm.constructor.name === "SingularError") {
+				this.errors.push(elm);
+			}
+		})
+
+		this.errors.forEach((e) => {
+			e.questionNames.forEach((qn) => {
+				e.questions.push(this.findQuestionByName(qn))
+			})
+		})
+
 		this.visibleIf = isFunction(visibleIf) ? visibleIf : function() {return visibleIf};
 	}
 }
@@ -137,16 +220,22 @@ Page.prototype.render = function(containerJQuery) {
 	var HTML = "<div id='page'></div>";
 	containerJQuery.append(HTML);
 
-	// pass 1: put questions into the DOM
-	this.questions.forEach((q) => {
-		$("#page").append(q.render());
+	// pass 1: put elements into the DOM
+	this.elements.forEach((elm) => {
+		$("#page").append(elm.render());
 	})
+
 
 	// pass 2: set question properties
 	this.questions.forEach((q) => {
 		q.setProperties();
 		q.linkToVariable && q.linkToVariable();
-		q.linkToDependants && q.linkToDependants(this);
+		q.linkToDependantQuestions && q.linkToDependantQuestions(this);
+		q.linkToErrors && q.linkToErrors(this);
+	})
+
+	this.errors.forEach((e) => {
+		e.setVisibility();
 	})
 }
 Page.prototype.makeQuestionVisible = function(question) {
@@ -164,10 +253,14 @@ Page.prototype.makeQuestionVisible = function(question) {
 	}
 	question.setProperties();
 	question.linkToVariable && question.linkToVariable();
-	question.linkToDependants && question.linkToDependants(this);
+	question.linkToDependantQuestions && question.linkToDependantQuestions(this);
+	question.linkToErrors && question.linkToErrors(this);
 }
 Page.prototype.findQuestionIndex = function(question) {
 	return this.questions.indexOf(question);
+}
+Page.prototype.findQuestionByName = function(qName) {
+	return this.questions.find((q) => {return q.name === qName});
 }
 
 class Survey {
@@ -206,8 +299,9 @@ function debounce(func, wait, immediate) {
 	};
 };
 
+var survey;
 $(document).ready(function() {
-	const survey = new Survey(surveyJSON);
+ 	survey = new Survey(surveyJSON)
 	survey.render($("#surveyContainer"));
 })
 
@@ -217,7 +311,7 @@ $(document).ready(function() {
 const surveyJSON = {
 	pages: [
 		new Page({
-			questions: [
+			elements: [
 				new Question({
 					type: Question.Types.TEXT,
 					placeholder: "hi",
@@ -225,12 +319,18 @@ const surveyJSON = {
 
 					name: "hi",
 				}),
+				new SingularError({
+					name: "e1",
+					message: "error",
+					visibleIf: function() {return variables["d"] === ""},
+					questionNames: ["d"]
+				}),
 				new Question({
 					type: Question.Types.TEXT,
 					placeholder: "plasework",
-					defaultValue: "OHMYG",
-					disabledIf: true,
+					defaultValue: "",
 					visibleIf: function() {return variables["hi"] !== "1"},
+					disabledIf: function() {return variables["hi"] !== "2"},
 
 					name: "d",
 				}),
