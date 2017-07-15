@@ -56,6 +56,17 @@ class Question {
 						this.disabled = false;
 					}
 				}
+				this.visible = true;
+				this.setVisibility = function(page) {
+					if (this.visibleIf() === true && this.visible === false) {
+						page.makeQuestionVisible(this);
+						this.visible = true;
+					} else if (this.visibleIf() === false && this.visible === true) {
+						$(this.inputSelector).remove();
+						this.visible = false;
+						this.disabled = false; // might want to refactor this
+					}
+				}
 				this.linkToVariable = function() {
 					$(this.inputSelector).keydown(debounce(
 						() => {
@@ -63,10 +74,10 @@ class Question {
 						}, 250
 					));
 				}
-				this.linkToDependants = function(questions) {
+				this.linkToDependants = function(page) {
 					this.visibilityDependants = [];
 					this.disabilityDependants = [];
-					questions.forEach((q) => {
+					page.questions.forEach((q) => {
 						if (q.visibleIf.toString().includes('variables["' + this.name + '"]')) {
 							this.visibilityDependants.push(q.name);
 						} else if (q.disabledIf.toString().includes('variables["' + this.name + '"]')) {
@@ -74,15 +85,19 @@ class Question {
 						}
 					});
 					if (this.visibilityDependants.length !== 0) {
-						$(this.inputSelector).change(() => {
-							// todo	
-						});
+						$(this.inputSelector).keydown(debounce(
+							() => {
+								this.visibilityDependants.forEach((d) => {
+									page.questions.find((q) => {return q.name === d}).setVisibility(page);
+								})
+							}, 250
+						));
 					}
 					if (this.disabilityDependants.length !== 0) {
 						$(this.inputSelector).keydown(debounce(
 							() => {
 								this.disabilityDependants.forEach((d) => {
-									questions.find((q) => {return q.name === d}).setDisability();
+									page.questions.find((q) => {return q.name === d}).setDisability();
 								})
 							}, 250
 						));
@@ -96,10 +111,11 @@ Question.Types = {
 	TEXT: 0,
 }
 
-Question.prototype.render = function(containerJQuery, append) {
-	if (!this.visibleIf()) return;
+Question.prototype.render = function() {
+	if (!this.visibleIf()) return undefined;
 
 	var HTML = this.generateSkeletonHTML();
+	return HTML
 	if (append === true) {
 		containerJQuery.append(HTML);	
 	}	
@@ -123,17 +139,36 @@ Page.prototype.render = function(containerJQuery) {
 
 	// pass 1: put questions into the DOM
 	this.questions.forEach((q) => {
-		q.render($("#page"), true);
+		$("#page").append(q.render());
 	})
 
 	// pass 2: set question properties
 	this.questions.forEach((q) => {
 		q.setProperties();
 		q.linkToVariable && q.linkToVariable();
-		q.linkToDependants && q.linkToDependants(this.questions);
+		q.linkToDependants && q.linkToDependants(this);
 	})
 }
-
+Page.prototype.makeQuestionVisible = function(question) {
+	var prevElm = undefined;
+	for (var i = this.findQuestionIndex(question) - 1; i >= 0; i --) {
+		if (this.questions[i].visibleIf()) {
+			prevElm = $(this.questions[i].inputSelector);
+			prevElm.after(question.render());
+			break;
+		}
+	}
+	if (!prevElm) {
+		prevElm = $("#page");
+		prevElm.prepend(question.render());
+	}
+	question.setProperties();
+	question.linkToVariable && question.linkToVariable();
+	question.linkToDependants && question.linkToDependants(this);
+}
+Page.prototype.findQuestionIndex = function(question) {
+	return this.questions.indexOf(question);
+}
 
 class Survey {
 	constructor({pages=[]}) {
@@ -186,13 +221,16 @@ const surveyJSON = {
 				new Question({
 					type: Question.Types.TEXT,
 					placeholder: "hi",
-					disabledIf: function() {return variables["d"] === "hi"},
+					visibleIf: function() {return variables["d"] !== "bye"},
 
 					name: "hi",
-					visibleIf: true,
 				}),
 				new Question({
 					type: Question.Types.TEXT,
+					placeholder: "plasework",
+					defaultValue: "OHMYG",
+					disabledIf: true,
+					visibleIf: function() {return variables["hi"] !== "1"},
 
 					name: "d",
 				}),
