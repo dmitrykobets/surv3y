@@ -8,15 +8,20 @@ class Div {
 		this.selector = "#" + this.id;
 
 		this.children = children;
+		this.visible = true;
 	}
 }
 Div.count = 0;
 Div.prototype.render = function() {
-	var HTML = "";
+	var HTML = "<div id='" + this.id + "' class='" + this.classes.join(" ") + "'>";
 	this.children.forEach((e) => {
 		HTML += e.render();
 	})
+	HTML += "</div>";
 	return HTML
+}
+Div.prototype.isEmpty = function() {
+	return this.children.find((c) => {return c.visible === true}) === undefined;
 }
 
 class SingularError {
@@ -37,7 +42,7 @@ class SingularError {
 	}
 }
 SingularError.prototype.render = function() {
-	var HTML = "<div id='" + this.id + "' hidden>" + this.message + "</div>";
+	var HTML = "<div id='" + this.id + "' class='survey-error' hidden>" + this.message + "</div>";
 	return HTML;
 }
 SingularError.prototype.setVisibility = function(onChange) {
@@ -136,14 +141,15 @@ class Question {
 				this.visible = true;
 				this.setVisibility = function(page) {
 					if (this.visibleIf() === true && this.visible === false) {
-						//page.makeQuestionVisible(this);
-						$(this.inputSelector).show();
 						this.visible = true;
+						page.showQuestion(this);
+						//$(this.inputSelector).show();
 					} else if (this.visibleIf() === false && this.visible === true) {
 						//$(this.inputSelector).remove();
-						$(this.inputSelector).hide();
+						//$(this.inputSelector).hide();
 						this.visible = false;
 						this.disabled = false; // might want to refactor this
+						page.hideQuestion(this);
 					}
 					this.errors.forEach((e) => {
 						e.setVisibility(true);
@@ -347,7 +353,22 @@ Page.prototype.render = function(containerJQuery) {
 		e.setVisibility(false);
 	})
 }
-Page.prototype.makeQuestionVisible = function(question) {
+Page.prototype.hideQuestion = function(question) {
+	$(question.inputSelector).remove();
+	var parentDiv = question;
+	do {
+		parentDiv = this.getParentDiv(parentDiv);
+		var hidden = true;
+		if (parentDiv !== undefined && parentDiv.isEmpty()) {
+			$(parentDiv.selector).remove();
+			parentDiv.visible = false;
+		} else {
+			hidden = false;
+		}
+	} while (hidden === true);
+}
+Page.prototype.showQuestion = function(question) {
+	/*()
 	var prevElm = undefined;
 	for (var i = this.findQuestionIndex(question) - 1; i >= 0; i --) {
 		if (this.questions()[i].visibleIf()) {
@@ -364,7 +385,50 @@ Page.prototype.makeQuestionVisible = function(question) {
 	question.linkToVariable && question.linkToVariable();
 	question.linkToDependantQuestions && question.linkToDependantQuestions(this);
 	question.linkToErrors && question.linkToErrors(this);
+	*/
 }
+Page.prototype.getParentDiv = function(elm) {
+	const recurse = (source) => {
+		var collection = [];
+		if (source === this) {
+			collection = this.elements;
+		} else if (source.constructor.name === "Div") {
+			collection = source.children;
+		}
+
+		var ret = undefined;
+		for (i in collection) {
+			if (collection[i] === elm) {
+				ret = source;
+			} else {
+				ret = recurse(collection[i])
+			}
+			if (ret !== undefined) return ret;
+		}
+
+		return undefined;
+	}
+	return recurse(this);
+}
+/*
+Page.prototype.showQuestion = function(question) {
+	var prevElm = undefined;
+	for (var i = this.findQuestionIndex(question) - 1; i >= 0; i --) {
+		if (this.questions()[i].visibleIf()) {
+			prevElm = $(this.questions()[i].inputSelector);
+			prevElm.after(question.render());
+			break;
+		}
+	}
+	if (!prevElm) {
+		prevElm = $("#page");
+		prevElm.prepend(question.render());
+	}
+	question.setProperties();
+	question.linkToVariable && question.linkToVariable();
+	question.linkToDependantQuestions && question.linkToDependantQuestions(this);
+	question.linkToErrors && question.linkToErrors(this);
+}*/
 Page.prototype.findQuestionIndex = function(question) {
 	return this.questions().indexOf(question);
 }
@@ -440,41 +504,48 @@ const surveyJSON = {
 	pages: [
 		new Page({
 			elements: [
-				
-				new SingularTemplateError ({
-					templateName: "required",
-					questionName: "d",
-				}),
-				new Question({
-					type: Question.Types.TEXT,
-					placeholder: "hi",
-					visibleIf: function() {return variables["d"] !== "bye"},
-
-					name: "hi",
-					isRequired: true,
+				new Div({
+					classes: ["row", "small-6 columns"],
+					children: [
+						new SingularTemplateError ({
+							templateName: "required",
+							questionName: "left",
+						}),
+					]
 				}),
 				new Div({
+					classes: ["row", "small-6"],
 					children: [
-						/*
-						new SingularError({
-							name: "e1",
-							message: "expect to see me",
-							visibleIf: function() {return variables["d"] === ""},
-						})*/
 						new Div({
+							classes: ["small-6 columns"],
+							children: [new Div({
+								children: [
+									new Question({
+										type: Question.Types.TEXT,
+										placeholder: "left",
+										defaultValue: "",
+										visibleIf: function() {return variables["right"] !== "1"},
+										disabledIf: function() {return variables["right"] !== "2"},
+
+										name: "left",
+									}),
+								],
+							}),
+							]
+						}),
+						new Div({
+							classes: ["small-6 columns"],
 							children: [
 								new Question({
 									type: Question.Types.TEXT,
-									placeholder: "plasework",
-									defaultValue: "",
-									visibleIf: function() {return variables["hi"] !== "1"},
-									disabledIf: function() {return variables["hi"] !== "2"},
+									placeholder: "right",
+									visibleIf: function() {return variables["left"] !== "bye"},
 
-									name: "d",
+									name: "right",
 								}),
-							]
+							],
 						})
-					],
+					]
 				}),
 			],
 		}),
