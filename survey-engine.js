@@ -12,11 +12,11 @@ class Div {
 	}
 }
 Div.count = 0;
-Div.prototype.render = function() {
+Div.prototype.render = function(page) {
 	var HTML = "<div id='" + this.id + "' class='" + this.classes.join(" ") + "'>";
 	this.visible = true;
 	this.children.forEach((c) => {
-		HTML += c.render();
+		HTML += c.render(page);
 	})
 	HTML += "</div>";
 	return HTML
@@ -77,6 +77,20 @@ class SingularTemplateError {
 	}
 }
 
+class Title {
+	constructor({text, questionName}) {
+		this.text = text;
+		this.questionName = questionName;
+	}
+}
+Title.prototype.render = function(page) {
+	const correspondingQuestion = page.findQuestionByName(this.questionName);
+	if (correspondingQuestion === undefined) {
+		throw Error("Title does not correspond to any question");
+	}
+	if (!correspondingQuestion.visibleIf()) return "";
+	return "<h1>" + this.text + "</div>";
+}
 class Question {
 	constructor ({type, name, visibleIf=true, placeholder, defaultValue, disabledIf=false, isRequired=false}) {
 		if (type === undefined) {
@@ -229,25 +243,11 @@ class Page {
 		this.elements = elements;
 		var templateSingularsToConvertIndices = [];
 
-		this.questions = () => {
+		this.findElement = (className) => {
 			const recurse = function(collection) {
 				var results = [];
 				for (var i in collection) {
-					if (collection[i].constructor.name === "Question") {
-						results.push(collection[i]);
-					} else if (collection[i].constructor.name === "Div") {
-						results = results.concat(recurse(collection[i].children));
-					}
-				}
-				return results;
-			}
-			return recurse(this.elements);
-		}
-		this.errors = () => {
-			const recurse = function(collection) {
-				var results = [];
-				for (var i in collection) {
-					if (collection[i].constructor.name === "SingularError") {
+					if (collection[i].constructor.name === className) {
 						results.push(collection[i]);
 					} else if (collection[i].constructor.name === "Div") {
 						results = results.concat(recurse(collection[i].children));
@@ -331,7 +331,7 @@ Page.prototype.render = function(containerJQuery) {
 
 	// pass 1: put elements into the DOM
 	this.elements.forEach((elm) => {
-		$("#page").append(elm.render());
+		$("#page").append(elm.render(this));
 	})
 
 	// pass 2: set question properties
@@ -352,7 +352,7 @@ Page.prototype.hideQuestion = function(question) {
 	do {
 		parentDiv = this.getParentDiv(parentDiv);
 		var hidden = true;
-		if (parentDiv !== undefined && parentDiv.isEmpty()) {
+		if (parentDiv !== undefined && parentDiv !== this && parentDiv.isEmpty()) {
 			$(parentDiv.selector).remove();
 			parentDiv.visible = false;
 		} else {
@@ -360,18 +360,19 @@ Page.prototype.hideQuestion = function(question) {
 		}
 	} while (hidden === true);
 }
-Page.prototype.showQuestion = function(question) {
-	var parentDiv = question;
-	var topElmToShow = question;
+Page.prototype.showElement = function(element) {
+	var parentDiv = element;
+	var topElmToShow = element;
 	do {
 		parentDiv = this.getParentDiv(parentDiv);
-		if (parentDiv !== undefined && !parentDiv.visible) {
+		if (parentDiv !== this && parentDiv !== undefined && !parentDiv.visible) {
 			topElmToShow = parentDiv;
 		}
-	} while (parentDiv !== undefined && !parentDiv.visible);
+	} while (parentDiv !== undefined && parentDiv !== this && !parentDiv.visible);
+
 	var collection = [];
-	if (parentDiv === undefined) {
-		collection = parentDiv.elements;
+	if (parentDiv === undefined || parentDiv === this) {
+		collection = this.elements;
 	} else if (parentDiv.constructor.name === "Div") {
 		collection = parentDiv.children;
 	}
@@ -379,15 +380,23 @@ Page.prototype.showQuestion = function(question) {
 	var pre = undefined;
 	for (i in collection) {
 		if (collection[i] === topElmToShow) break;
-		else pre = collection[i];
+		else if ((collection[i].visibleIf && collection[i].visibleIf()) || collection[i].visible) {
+			pre = collection[i];
+		}
 	}
-	var parentSelector = parentDiv === undefined ? $("#page") : $(parentDiv.selector);
-
+	var parentSelector = (parentDiv === undefined || parentDiv === this) ? $("#page") : $(parentDiv.selector);
 	if (pre === undefined) {
-		parentSelector.prepend(topElmToShow.render());
+		parentSelector.prepend(topElmToShow.render(this));
 	} else {
-		parentSelector.after(topElmToShow.render());
+		parentSelector.after(topElmToShow.render(this));
 	}
+}
+Page.prototype.showQuestion = function(question) {
+	const title = this.findTitleByQuestionName(question.name);
+	if (title !== undefined) {
+		this.showElement(this.findTitleByQuestionName(question.name));
+	}
+	this.showElement(question);
 
 	question.setProperties();
 	question.linkToVariable && question.linkToVariable();
@@ -402,15 +411,16 @@ Page.prototype.getParentDiv = function(elm) {
 		} else if (source.constructor.name === "Div") {
 			collection = source.children;
 		}
-
 		var ret = undefined;
-		for (i in collection) {
-			if (collection[i] === elm) {
-				ret = source;
-			} else {
-				ret = recurse(collection[i])
+		if (collection.length !== 0) {
+			for (i in collection) {
+				if (collection[i] === elm) {
+					ret = source;
+				} else {
+					ret = recurse(collection[i])
+				}
+				if (ret !== undefined) return ret;
 			}
-			if (ret !== undefined) return ret;
 		}
 
 		return undefined;
@@ -436,6 +446,16 @@ Page.prototype.showQuestion = function(question) {
 	question.linkToDependantQuestions && question.linkToDependantQuestions(this);
 	question.linkToErrors && question.linkToErrors(this);
 }*/
+Page.prototype.questions = function() {
+	return this.findElement("Question");
+}
+Page.prototype.errors = function() {
+	return this.findElement("SingularError");
+}
+Page.prototype.titles = function() {
+	return this.findElement("Title");
+}
+
 Page.prototype.findQuestionIndex = function(question) {
 	return this.questions().indexOf(question);
 }
@@ -445,6 +465,9 @@ Page.prototype.findQuestionByName = function(qName, preloaded=undefined) {
 	} else {
 		return this.questions().find((q) => {return q.name === qName});
 	}
+}
+Page.prototype.findTitleByQuestionName = function(qName) {
+	return this.titles().find((t) => {return t.questionName === qName});
 }
 
 class Survey {
@@ -527,6 +550,10 @@ const surveyJSON = {
 						})
 					]
 				}),
+				new Title({
+					text: "PLEASE WORK",
+					questionName: "left",
+				}),
 				new Div({
 					classes: ["row", "small-6"],
 					children: [
@@ -538,7 +565,7 @@ const surveyJSON = {
 										type: Question.Types.TEXT,
 										placeholder: "left",
 										defaultValue: "",
-										visibleIf: function() {return variables["right"] !== "1"},
+										visibleIf: function() {return variables["right"] === "1"},
 										disabledIf: function() {return variables["right"] !== "2"},
 
 										name: "left",
