@@ -14,8 +14,9 @@ class Div {
 Div.count = 0;
 Div.prototype.render = function() {
 	var HTML = "<div id='" + this.id + "' class='" + this.classes.join(" ") + "'>";
-	this.children.forEach((e) => {
-		HTML += e.render();
+	this.visible = true;
+	this.children.forEach((c) => {
+		HTML += c.render();
 	})
 	HTML += "</div>";
 	return HTML
@@ -127,6 +128,7 @@ class Question {
 				}
 				this.disabled = false;
 				this.setDisability = function() {
+					if (!this.visible) return;
 					if (this.disabledIf() === true && this.disabled === false) {
 						$(this.inputSelector).prop('disabled', true);
 						this.disabled = true;
@@ -143,10 +145,8 @@ class Question {
 					if (this.visibleIf() === true && this.visible === false) {
 						this.visible = true;
 						page.showQuestion(this);
-						//$(this.inputSelector).show();
 					} else if (this.visibleIf() === false && this.visible === true) {
-						//$(this.inputSelector).remove();
-						//$(this.inputSelector).hide();
+						// set visible first because it is used to determine if parent divs need to be hidden
 						this.visible = false;
 						this.disabled = false; // might want to refactor this
 						page.hideQuestion(this);
@@ -368,24 +368,38 @@ Page.prototype.hideQuestion = function(question) {
 	} while (hidden === true);
 }
 Page.prototype.showQuestion = function(question) {
-	/*()
-	var prevElm = undefined;
-	for (var i = this.findQuestionIndex(question) - 1; i >= 0; i --) {
-		if (this.questions()[i].visibleIf()) {
-			prevElm = $(this.questions()[i].inputSelector);
-			prevElm.after(question.render());
-			break;
+	var parentDiv = question;
+	var topElmToShow = question;
+	do {
+		parentDiv = this.getParentDiv(parentDiv);
+		if (parentDiv !== undefined && !parentDiv.visible) {
+			topElmToShow = parentDiv;
 		}
+	} while (parentDiv !== undefined && !parentDiv.visible);
+	var collection = [];
+	if (parentDiv === undefined) {
+		collection = parentDiv.elements;
+	} else if (parentDiv.constructor.name === "Div") {
+		collection = parentDiv.children;
 	}
-	if (!prevElm) {
-		prevElm = $("#page");
-		prevElm.prepend(question.render());
+
+	var pre = undefined;
+	for (i in collection) {
+		if (collection[i] === topElmToShow) break;
+		else pre = collection[i];
 	}
+	var parentSelector = parentDiv === undefined ? $("#page") : $(parentDiv.selector);
+
+	if (pre === undefined) {
+		parentSelector.prepend(topElmToShow.render());
+	} else {
+		parentSelector.after(topElmToShow.render());
+	}
+
 	question.setProperties();
 	question.linkToVariable && question.linkToVariable();
 	question.linkToDependantQuestions && question.linkToDependantQuestions(this);
 	question.linkToErrors && question.linkToErrors(this);
-	*/
 }
 Page.prototype.getParentDiv = function(elm) {
 	const recurse = (source) => {
