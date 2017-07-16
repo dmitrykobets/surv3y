@@ -39,29 +39,26 @@ class SingularError {
 		this.questions = [];
 		this.id = name;
 		this.selector = "#" + this.id;
-		this.visible = false;
 	}
 }
 SingularError.prototype.render = function() {
 	var HTML = "<div id='" + this.id + "' class='survey-error' hidden>" + this.message + "</div>";
 	return HTML;
 }
-SingularError.prototype.setVisibility = function(onChange) {
+SingularError.prototype.updateVisibility = function(onChange) {
 	var shouldBeVisible = this.visibleIf() && (this.appearOnChange === true || onChange === false);
 	this.questions.forEach((q) => {
-		if (q.disabled) {
+		if (q.disabledIf()) {
 			shouldBeVisible = false;
 		}
-		if (!q.visible) {
+		if (!q.visibleIf()) {
 			shouldBeVisible = false;
 		}
 	})
-	if (shouldBeVisible === true && this.visible === false) {
+	if (shouldBeVisible === true) {
 		$(this.selector).show();
-		this.visible = true;
-	} else if (shouldBeVisible === false && this.visible === true) {
+	} else if (shouldBeVisible === false) {
 		$(this.selector).hide();
-		this.visible = false;
 	}
 }
 class TemplateError {
@@ -88,6 +85,7 @@ class Question {
 		this.type = type;		
 
 		this.visibleIf = isFunction(visibleIf) ? visibleIf : function() {return visibleIf};
+		this.visible = visibleIf();
 		// only used for text atm
 		this.disabledIf = isFunction(disabledIf) ? disabledIf : function() {return disabledIf};
 
@@ -126,33 +124,28 @@ class Question {
 						variables[this.name] = $(this.inputSelector).val();
 					}	
 				}
-				this.disabled = false;
 				this.setDisability = function() {
-					if (!this.visible) return;
-					if (this.disabledIf() === true && this.disabled === false) {
+					if (!this.visibleIf()) return;
+					if (this.disabledIf() === true) {
 						$(this.inputSelector).prop('disabled', true);
-						this.disabled = true;
-					} else if (this.disabledIf() === false && this.disabled === true) {
+					} else if (this.disabledIf() === false) {
 						$(this.inputSelector).prop('disabled', false);
-						this.disabled = false;
 					}
 					this.errors.forEach((e) => {
-						e.setVisibility(true);
+						e.updateVisibility(true);
 					})
 				}
-				this.visible = true;
-				this.setVisibility = function(page) {
+				this.updateVisibility = function(page) {
 					if (this.visibleIf() === true && this.visible === false) {
 						this.visible = true;
 						page.showQuestion(this);
 					} else if (this.visibleIf() === false && this.visible === true) {
 						// set visible first because it is used to determine if parent divs need to be hidden
 						this.visible = false;
-						this.disabled = false; // might want to refactor this
 						page.hideQuestion(this);
 					}
 					this.errors.forEach((e) => {
-						e.setVisibility(true);
+						e.updateVisibility(true);
 					})
 				}
 				this.linkToVariable = function() {
@@ -177,7 +170,7 @@ class Question {
 						$(this.inputSelector).keydown(debounce(
 							() => {
 								this.visibilityDependants.forEach((d) => {
-									page.questions().find((q) => {return q.name === d}).setVisibility(page);
+									page.questions().find((q) => {return q.name === d}).updateVisibility(page);
 								})
 							}, 250
 						));
@@ -203,7 +196,7 @@ class Question {
 						$(this.inputSelector).keydown(debounce(
 							() => {
 								this.errors.forEach((e) => {
-									e.setVisibility(true);
+									e.updateVisibility(true);
 								})
 							}, 250
 						));
@@ -218,7 +211,7 @@ Question.Types = {
 }
 
 Question.prototype.render = function() {
-	if (!this.visibleIf()) return undefined;
+	if (!this.visibleIf()) return "";
 
 	var HTML = this.generateSkeletonHTML();
 	return HTML
@@ -350,7 +343,7 @@ Page.prototype.render = function(containerJQuery) {
 	})
 
 	this.errors().forEach((e) => {
-		e.setVisibility(false);
+		e.updateVisibility(false);
 	})
 }
 Page.prototype.hideQuestion = function(question) {
@@ -521,10 +514,17 @@ const surveyJSON = {
 				new Div({
 					classes: ["row", "small-6 columns"],
 					children: [
+						/*
 						new SingularTemplateError ({
 							templateName: "required",
 							questionName: "left",
-						}),
+						}),*/
+						new SingularError ({
+							name: "fuckyou",
+							message: "fuck you",
+							visibleIf: function() { return variables["left"] !== ""},
+							appearOnChange: true,
+						})
 					]
 				}),
 				new Div({
