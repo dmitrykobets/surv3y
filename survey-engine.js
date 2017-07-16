@@ -81,15 +81,19 @@ class Title {
 	constructor({text, questionName}) {
 		this.text = text;
 		this.questionName = questionName;
+		this.id = "title_" + Title.num;
+		this.selector = "#" + this.id;
+		Title.num ++;
 	}
 }
+Title.num = 0;
 Title.prototype.render = function(page) {
 	const correspondingQuestion = page.findQuestionByName(this.questionName);
 	if (correspondingQuestion === undefined) {
 		throw Error("Title does not correspond to any question");
 	}
 	if (!correspondingQuestion.visibleIf()) return "";
-	return "<h1>" + this.text + "</div>";
+	return "<h1 id='" + this.id + "'>" + this.text + "</div>";
 }
 class Question {
 	constructor ({type, name, visibleIf=true, placeholder, defaultValue, disabledIf=false, isRequired=false}) {
@@ -109,7 +113,7 @@ class Question {
 		this.name = name;
 
 		this.inputId = "q_" + this.name + "_i";
-		this.inputSelector = "#" + this.inputId;
+		this.selector = "#" + this.inputId;
 
 		switch (this.type) {
 			case Question.Types.TEXT:
@@ -120,30 +124,30 @@ class Question {
 				}
 				if (placeholder !== undefined) {
 					this.setPlaceholder = function() {
-						$(this.inputSelector).prop('placeholder', placeholder);
+						$(this.selector).prop('placeholder', placeholder);
 					}
 				}
 				this.setDefaultValue = function() {
 					var setVal = variables[this.name];
 					if (setVal === undefined) {
 						if (defaultValue !== undefined) {
-							$(this.inputSelector).val(defaultValue);
+							$(this.selector).val(defaultValue);
 						}
 					} else {
-						$(this.inputSelector).val(setVal);
+						$(this.selector).val(setVal);
 					}
 				}
 				this.setVariable = function() {
 					if (variables[this.name] === undefined) {
-						variables[this.name] = $(this.inputSelector).val();
+						variables[this.name] = $(this.selector).val();
 					}	
 				}
 				this.setDisability = function() {
 					if (!this.visibleIf()) return;
 					if (this.disabledIf() === true) {
-						$(this.inputSelector).prop('disabled', true);
+						$(this.selector).prop('disabled', true);
 					} else if (this.disabledIf() === false) {
-						$(this.inputSelector).prop('disabled', false);
+						$(this.selector).prop('disabled', false);
 					}
 					this.errors.forEach((e) => {
 						e.updateVisibility(true);
@@ -163,9 +167,9 @@ class Question {
 					})
 				}
 				this.linkToVariable = function() {
-					$(this.inputSelector).keydown(debounce(
+					$(this.selector).keydown(debounce(
 						() => {
-							variables[this.name] = $(this.inputSelector).val();
+							variables[this.name] = $(this.selector).val();
 						}, 250
 					));
 				}
@@ -181,7 +185,7 @@ class Question {
 						}
 					});
 					if (this.visibilityDependants.length !== 0) {
-						$(this.inputSelector).keydown(debounce(
+						$(this.selector).keydown(debounce(
 							() => {
 								this.visibilityDependants.forEach((d) => {
 									page.questions().find((q) => {return q.name === d}).updateVisibility(page);
@@ -190,7 +194,7 @@ class Question {
 						));
 					}
 					if (this.disabilityDependants.length !== 0) {
-						$(this.inputSelector).keydown(debounce(
+						$(this.selector).keydown(debounce(
 							() => {
 								this.disabilityDependants.forEach((d) => {
 									page.questions().find((q) => {return q.name === d}).setDisability();
@@ -207,7 +211,7 @@ class Question {
 						}
 					});
 					if (this.errors.length !== 0) {
-						$(this.inputSelector).keydown(debounce(
+						$(this.selector).keydown(debounce(
 							() => {
 								this.errors.forEach((e) => {
 									e.updateVisibility(true);
@@ -347,8 +351,15 @@ Page.prototype.render = function(containerJQuery) {
 	})
 }
 Page.prototype.hideQuestion = function(question) {
-	$(question.inputSelector).remove();
-	var parentDiv = question;
+	this.hideElement(question);
+	const title = this.findTitleByQuestionName(question.name);
+	if (title !== undefined) {
+		this.hideElement(title);
+	}
+}
+Page.prototype.hideElement = function(element) {
+	$(element.selector).remove();
+	var parentDiv = element;
 	do {
 		parentDiv = this.getParentDiv(parentDiv);
 		var hidden = true;
@@ -394,7 +405,7 @@ Page.prototype.showElement = function(element) {
 Page.prototype.showQuestion = function(question) {
 	const title = this.findTitleByQuestionName(question.name);
 	if (title !== undefined) {
-		this.showElement(this.findTitleByQuestionName(question.name));
+		this.showElement(title);
 	}
 	this.showElement(question);
 
@@ -432,7 +443,7 @@ Page.prototype.showQuestion = function(question) {
 	var prevElm = undefined;
 	for (var i = this.findQuestionIndex(question) - 1; i >= 0; i --) {
 		if (this.questions()[i].visibleIf()) {
-			prevElm = $(this.questions()[i].inputSelector);
+			prevElm = $(this.questions()[i].selector);
 			prevElm.after(question.render());
 			break;
 		}
@@ -565,7 +576,7 @@ const surveyJSON = {
 										type: Question.Types.TEXT,
 										placeholder: "left",
 										defaultValue: "",
-										visibleIf: function() {return variables["right"] === "1"},
+										visibleIf: function() {return variables["right"] !== "1"},
 										disabledIf: function() {return variables["right"] !== "2"},
 
 										name: "left",
