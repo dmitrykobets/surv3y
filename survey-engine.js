@@ -8,11 +8,12 @@ class Div {
 		this.selector = "#" + this.id;
 
 		this.children = children;
-		this.visible = true;
+		this.visible = false;
 	}
 }
 Div.count = 0;
 Div.prototype.render = function(page) {
+	if (this.isEmpty()) return "";
 	var HTML = "<div id='" + this.id + "' class='" + this.classes.join(" ") + "'>";
 	this.visible = true;
 	this.children.forEach((c) => {
@@ -22,7 +23,16 @@ Div.prototype.render = function(page) {
 	return HTML
 }
 Div.prototype.isEmpty = function() {
-	return this.children.find((c) => {return c.visible === true}) === undefined;
+	var empty = true;
+	for (var i in this.children) {
+		if (this.children[i].constructor.name === "Div") {
+			empty = this.children[i].isEmpty();
+		} else {
+			empty = !((this.children[i].visibleIf && this.children[i].visibleIf()) === true || this.children[i].visible === true);
+		}
+		if (empty === false) break;
+	}
+	return empty;
 }
 
 class SingularError {
@@ -32,7 +42,11 @@ class SingularError {
 		if (!isFunction(visibleIf)) {
 			throw Error ("Error visibility condition must be a function");
 		}
-		this.visibleIf = visibleIf;
+		this.logicVisibleIf = visibleIf;
+		this.visible = false;
+		this.visibleIf = () => {
+			return this.logicVisibleIf() && this.visible;
+		}
 
 		this.appearOnChange = appearOnChange;
 
@@ -42,11 +56,12 @@ class SingularError {
 	}
 }
 SingularError.prototype.render = function() {
-	var HTML = "<div id='" + this.id + "' class='survey-error' hidden>" + this.message + "</div>";
+	if (this.visibleIf() === false) return "";
+	var HTML = "<div id='" + this.id + "' class='survey-error'>" + this.message + "</div>";
 	return HTML;
 }
 SingularError.prototype.updateVisibility = function(onChange) {
-	var shouldBeVisible = this.visibleIf() && (this.appearOnChange === true || onChange === false);
+	var shouldBeVisible = this.logicVisibleIf() && (this.appearOnChange === true || onChange === false);
 	this.questions.forEach((q) => {
 		if (q.disabledIf()) {
 			shouldBeVisible = false;
@@ -55,10 +70,12 @@ SingularError.prototype.updateVisibility = function(onChange) {
 			shouldBeVisible = false;
 		}
 	})
-	if (shouldBeVisible === true) {
-		$(this.selector).show();
-	} else if (shouldBeVisible === false) {
-		$(this.selector).hide();
+	if (shouldBeVisible === true && this.visible === false) {
+		this.visible = shouldBeVisible;
+		this.page.showElement(this);
+	} else if (shouldBeVisible === false && this.visible === true) {
+		this.visible = shouldBeVisible;
+		this.page.hideElement(this);
 	}
 }
 class TemplateError {
@@ -84,15 +101,19 @@ class Title {
 		this.id = "title_" + Title.num;
 		this.selector = "#" + this.id;
 		Title.num ++;
+		this.visible = false;
+		this.visibleIf = () => {
+			const correspondingQuestion = this.page.findQuestionByName(this.questionName);
+			if (correspondingQuestion === undefined) {
+				throw Error("Title does not correspond to any question");
+			}
+			return correspondingQuestion.visibleIf();
+		}
 	}
 }
 Title.num = 0;
 Title.prototype.render = function(page) {
-	const correspondingQuestion = page.findQuestionByName(this.questionName);
-	if (correspondingQuestion === undefined) {
-		throw Error("Title does not correspond to any question");
-	}
-	if (!correspondingQuestion.visibleIf()) return "";
+	if (!this.visibleIf()) return "";
 	return "<h1 id='" + this.id + "'>" + this.text + "</div>";
 }
 class Question {
@@ -206,7 +227,7 @@ class Question {
 				this.errors = [];
 				this.linkToErrors = function(page) {
 					page.errors().forEach((e) => {
-						if (e.visibleIf.toString().includes('variables["' + this.name + '"]')) {
+						if (e.logicVisibleIf.toString().includes('variables["' + this.name + '"]')) {
 							this.errors.push(e);
 						}
 					});
@@ -315,7 +336,7 @@ class Page {
 			// push questions each error depends on in terms of state (visible/disabled)
 			const varRegex = /variables\["(.+?)"\]/g;
 			this.errors().forEach((e) => {
-				const fString = e.visibleIf.toString();	
+				const fString = e.logicVisibleIf.toString();	
 				var match = varRegex.exec(fString);
 				while (match != null) {
 					e.questions.push(this.findQuestionByName(match[1], qs));
@@ -327,6 +348,12 @@ class Page {
 		}
 
 		this.visibleIf = isFunction(visibleIf) ? visibleIf : function() {return visibleIf};
+		this.errors().forEach((e) => {
+			e.page = this;
+		})
+		this.titles().forEach((t) => {
+			t.page = this;
+		})
 	}
 }
 Page.prototype.render = function(containerJQuery) {
@@ -354,6 +381,7 @@ Page.prototype.hideQuestion = function(question) {
 	this.hideElement(question);
 	const title = this.findTitleByQuestionName(question.name);
 	if (title !== undefined) {
+		title.visible = false;
 		this.hideElement(title);
 	}
 }
@@ -405,6 +433,7 @@ Page.prototype.showElement = function(element) {
 Page.prototype.showQuestion = function(question) {
 	const title = this.findTitleByQuestionName(question.name);
 	if (title !== undefined) {
+		title.visible = true;
 		this.showElement(title);
 	}
 	this.showElement(question);
@@ -554,16 +583,20 @@ const surveyJSON = {
 							questionName: "left",
 						}),*/
 						new SingularError ({
-							name: "fuckyou",
-							message: "fuck you",
+							name: "oops",
+							message: "oops you",
 							visibleIf: function() { return variables["left"] !== ""},
 							appearOnChange: true,
 						})
 					]
 				}),
-				new Title({
-					text: "PLEASE WORK",
-					questionName: "left",
+				new Div({
+					children: [
+						new Title({
+							text: "PLEASE WORK",
+							questionName: "left",
+						}),
+					]
 				}),
 				new Div({
 					classes: ["row", "small-6"],
