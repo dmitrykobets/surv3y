@@ -242,11 +242,117 @@ class Question {
 					}
 				}
 				break;
+			case Question.Types.NUMBER:
+				this.isRequired = isRequired;
+				this.generateSkeletonHTML = function() {
+					var HTML = "<input id='" + this.inputId + "' type='number'/>"
+					return HTML;
+				}
+				if (placeholder !== undefined) {
+					this.setPlaceholder = function() {
+						$(this.selector).prop('placeholder', placeholder);
+					}
+				}
+				this.setDefaultValue = function() {
+					var setVal = variables[this.name];
+					if (setVal === undefined) {
+						if (defaultValue !== undefined) {
+							$(this.selector).val(defaultValue);
+						}
+					} else {
+						$(this.selector).val(setVal);
+					}
+				}
+				this.setVariable = function() {
+					if (variables[this.name] === undefined) {
+						variables[this.name] = parseInt($(this.selector).val());
+					}	
+				}
+				this.setDisability = function() {
+					if (!this.visibleIf()) return;
+					if (this.disabledIf() === true) {
+						$(this.selector).prop('disabled', true);
+					} else if (this.disabledIf() === false) {
+						$(this.selector).prop('disabled', false);
+					}
+					this.errors.forEach((e) => {
+						e.updateVisibility(true);
+					})
+				}
+				this.updateVisibility = function(page) {
+					if (this.visibleIf() === true && this.visible === false) {
+						this.visible = true;
+						page.showQuestion(this);
+					} else if (this.visibleIf() === false && this.visible === true) {
+						// set visible first because it is used to determine if parent divs need to be hidden
+						this.visible = false;
+						page.hideQuestion(this);
+					}
+					this.errors.forEach((e) => {
+						e.updateVisibility(true);
+					})
+				}
+				this.linkToVariable = function() {
+					$(this.selector).keydown(debounce(
+						() => {
+							variables[this.name] = parseInt($(this.selector).val());
+						}, 250
+					));
+				}
+				this.visibilityDependants = [];
+				this.disabilityDependants = [];
+				this.linkToDependantQuestions = function(page) {
+					page.questions().forEach((q) => {
+						if (q.visibleIf.toString().includes('variables["' + this.name + '"]')) {
+							this.visibilityDependants.push(q.name);
+						} 
+						if (q.disabledIf.toString().includes('variables["' + this.name + '"]')) {
+							this.disabilityDependants.push(q.name);
+						}
+					});
+					if (this.visibilityDependants.length !== 0) {
+						$(this.selector).keydown(debounce(
+							() => {
+								this.visibilityDependants.forEach((d) => {
+									page.questions().find((q) => {return q.name === d}).updateVisibility(page);
+								})
+							}, 250
+						));
+					}
+					if (this.disabilityDependants.length !== 0) {
+						$(this.selector).keydown(debounce(
+							() => {
+								this.disabilityDependants.forEach((d) => {
+									page.questions().find((q) => {return q.name === d}).setDisability();
+								})
+							}, 250
+						));
+					}
+				}
+				this.errors = [];
+				this.linkToErrors = function(page) {
+					page.errors().forEach((e) => {
+						if (e.logicVisibleIf.toString().includes('variables["' + this.name + '"]')) {
+							this.errors.push(e);
+						}
+					});
+					if (this.errors.length !== 0) {
+						$(this.selector).keydown(debounce(
+							() => {
+								this.errors.forEach((e) => {
+									e.updateVisibility(true);
+								})
+							}, 250
+						));
+					}
+				}
+				break;
 		}
 	}
 }
 Question.Types = {
 	TEXT: "TEXT",
+	NUMBER: "NUMBER",
 }
 
 Question.prototype.render = function() {
@@ -345,12 +451,13 @@ class Page {
 			})
 
 			this.errorsInitialized = true;
+
+			this.errors().forEach((e) => {
+				e.page = this;
+			})
 		}
 
 		this.visibleIf = isFunction(visibleIf) ? visibleIf : function() {return visibleIf};
-		this.errors().forEach((e) => {
-			e.page = this;
-		})
 		this.titles().forEach((t) => {
 			t.page = this;
 		})
@@ -568,6 +675,7 @@ const surveyJSON = {
 			appearOnChange: true,
 			visibleIfFuncStrings: {
 				[Question.Types.TEXT]: 'function() {return variables[] === ""}',
+				[Question.Types.NUMBER]: 'function() {return isNaN(variables[])}',
 			}
 		})
 	],
@@ -609,10 +717,11 @@ const surveyJSON = {
 										type: Question.Types.TEXT,
 										placeholder: "left",
 										defaultValue: "",
-										visibleIf: function() {return variables["right"] !== "1"},
-										disabledIf: function() {return variables["right"] !== "2"},
+										visibleIf: function() {return variables["right"] !== 1},
+										disabledIf: function() {return variables["right"] !== 2},
 
 										name: "left",
+										isRequired: true
 									}),
 								],
 							}),
@@ -622,11 +731,12 @@ const surveyJSON = {
 							classes: ["small-6 columns"],
 							children: [
 								new Question({
-									type: Question.Types.TEXT,
+									type: Question.Types.NUMBER,
 									placeholder: "right",
 									visibleIf: function() {return variables["left"] !== "bye"},
 
 									name: "right",
+									isRequired: true
 								}),
 							],
 						})
