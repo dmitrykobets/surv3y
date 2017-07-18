@@ -7,17 +7,23 @@ class Div {
 		Div.count ++;
 		this.selector = "#" + this.id;
 
+        this.visibleIf = function() {
+            return this.isEmpty() === false;
+        }
+        this.isAlreadyVisible = function() {
+            return $(this.selector).length !== 0;
+        }
 		this.children = children;
-		this.visible = false;
 	}
 }
 Div.count = 0;
-Div.prototype.render = function(page) {
-	if (this.isEmpty()) return "";
-	var HTML = "<div id='" + this.id + "' class='" + this.classes.join(" ") + "'>";
-	this.visible = true;
+Div.prototype.render = function() {
+    if (this.isAlreadyVisible()) return "";
+    var HTML = "<div id='" + this.id + "' class='" + this.classes.join(" ") + "'>";
 	this.children.forEach((c) => {
-		HTML += c.render(page);
+        if (!c.isAlreadyVisible()) {
+            HTML += c.render();
+        }
 	})
 	HTML += "</div>";
 	return HTML
@@ -28,69 +34,59 @@ Div.prototype.isEmpty = function() {
 		if (this.children[i].constructor.name === "Div") {
 			empty = this.children[i].isEmpty();
 		} else {
-			empty = !((this.children[i].visibleIf && this.children[i].visibleIf()) === true || this.children[i].visible === true);
+			empty = this.children[i].visibleIf() === false;
 		}
 		if (empty === false) break;
 	}
 	return empty;
 }
 
-class SingularError {
-	constructor({name, message, visibleIf, appearOnChange=true}) {
+class Error {
+	constructor({name, message, logicVisibleIf, appearOnChange=true}) {
 		this.name = name;
 		this.message = message;
-		if (!isFunction(visibleIf)) {
+		if (!isFunction(logicVisibleIf)) {
 			throw Error ("Error visibility condition must be a function");
+        }
+
+		this.id = name;
+		this.selector = "#" + this.id;
+
+		this.logicVisibleIf = logicVisibleIf;
+		this.visibleIf = (onChange=false) => {
+			return this.logicVisibleIf() && this.isVisibleBasedOnQuestionState(onChange);
 		}
-		this.logicVisibleIf = visibleIf;
-		this.visible = false;
-		this.visibleIf = () => {
-			return this.logicVisibleIf() && this.visible;
-		}
+        this.isAlreadyVisible = function() {
+            return $(this.selector).length !== 0;
+        }
 
 		this.appearOnChange = appearOnChange;
 
 		this.questions = [];
-		this.id = name;
-		this.selector = "#" + this.id;
 	}
 }
-SingularError.prototype.render = function() {
-	if (this.visibleIf() === false) return "";
+Error.prototype.render = function() {
+	if (this.isAlreadyVisible()) return "";
 	var HTML = "<div id='" + this.id + "' class='survey-error'>" + this.message + "</div>";
 	return HTML;
 }
-SingularError.prototype.updateVisibility = function(onChange) {
-	var shouldBeVisible = this.logicVisibleIf() && (this.appearOnChange === true || onChange === false);
-	this.questions.forEach((q) => {
+Error.prototype.isVisibleBasedOnQuestionState = function(onChange) {
+	var shouldBeVisible = this.appearOnChange === true || onChange === false;
+	this.questions.forEach((q) => { // needs to be fixed -- right now, if ANY of the triggering questions are disabled/invisible, will remove this error even if remaining questions pass
 		if (q.disabledIf()) {
 			shouldBeVisible = false;
 		}
 		if (!q.visibleIf()) {
 			shouldBeVisible = false;
 		}
-	})
-	if (shouldBeVisible === true && this.visible === false) {
-		this.visible = shouldBeVisible;
+    })
+    return shouldBeVisible;
+}
+Error.prototype.updateVisibility = function(onChange=false) {
+	if (this.visibleIf(onChange) === true) {
 		this.page.showElement(this);
-	} else if (shouldBeVisible === false && this.visible === true) {
-		this.visible = shouldBeVisible;
+	} else {
 		this.page.hideElement(this);
-	}
-}
-class TemplateError {
-	constructor({name, message, appearOnChange=true, visibleIfFuncStrings={}, questionName}) {
-		this.name = name;
-		this.message = message;
-		this.appearOnChange = appearOnChange;
-		this.questionName = questionName;
-		this.visibleIfFuncStrings = visibleIfFuncStrings;
-	}
-}
-class SingularTemplateError {
-	constructor({templateName, questionName}) {
-		this.templateName = templateName;
-		this.questionName = questionName;
 	}
 }
 
@@ -98,34 +94,38 @@ class Title {
 	constructor({text, questionName}) {
 		this.text = text;
 		this.questionName = questionName;
-		this.id = "title_" + Title.num;
-		this.selector = "#" + this.id;
-		Title.num ++;
-		this.visible = false;
+		this.id = "title_" + questionName;
+        this.selector = "#" + this.id;
+
+        this.question = undefined;
+
 		this.visibleIf = () => {
-			const correspondingQuestion = this.page.findQuestionByName(this.questionName);
-			if (correspondingQuestion === undefined) {
+            if (this.question === undefined) {
 				throw Error("Title does not correspond to any question");
-			}
-			return correspondingQuestion.visibleIf();
+            }
+			return this.question.visibleIf();
 		}
+        this.isAlreadyVisible = function() {
+            return $(this.selector).length !== 0;
+        }
 	}
 }
-Title.num = 0;
 Title.prototype.render = function(page) {
-	if (!this.visibleIf()) return "";
-	return "<h1 id='" + this.id + "'>" + this.text + "</div>";
+	if (this.isAlreadyVisible()) return "";
+	return "<h1 id='" + this.id + "'>" + this.text + "</h1>";
 }
+
 class Question {
-	constructor ({type, name, visibleIf=true, placeholder, defaultValue, disabledIf=false, isRequired=false}) {
+	constructor ({type, name, visibleIf=true, placeholder, defaultValue, disabledIf=false}) {
 		if (type === undefined) {
 			throw Error("Question missing type");
 		}
-		this.type = type;		
+		this.type = type;
 
 		this.visibleIf = isFunction(visibleIf) ? visibleIf : function() {return visibleIf};
-		this.visible = visibleIf();
-		// only used for text atm
+        this.isAlreadyVisible = function() {
+            return $(this.selector).length !== 0;
+        }
 		this.disabledIf = isFunction(disabledIf) ? disabledIf : function() {return disabledIf};
 
 		if (name === undefined) {
@@ -134,36 +134,55 @@ class Question {
 		this.name = name;
 
 		this.inputId = "q_" + this.name + "_i";
-		this.selector = "#" + this.inputId;
+        this.selector = "#" + this.inputId;
+        
 
-		switch (this.type) {
-			case Question.Types.TEXT:
-				this.isRequired = isRequired;
-				this.generateSkeletonHTML = function() {
+
+        this.generateSkeletonHTML = function() {
+            switch (this.type) {
+                case Question.Types.TEXT:
 					var HTML = "<input id='" + this.inputId + "' type='text'/>"
 					return HTML;
-				}
-				if (placeholder !== undefined) {
-					this.setPlaceholder = function() {
-						$(this.selector).prop('placeholder', placeholder);
-					}
-				}
-				this.setDefaultValue = function() {
+            }
+        }
+        this.setPlaceholder = function() {
+            if (placeholder !== undefined) {
+                switch (this.type) {
+                    case Question.Types.TEXT:
+                        $(this.selector).prop('placeholder', placeholder);
+                        break;
+                }
+            }
+        }
+
+        this.setDefaultValue = function() {
+            switch (this.type) {
+                case Question.Types.TEXT:
 					var setVal = variables[this.name];
 					if (setVal === undefined) {
 						if (defaultValue !== undefined) {
 							$(this.selector).val(defaultValue);
 						}
 					} else {
-						$(this.selector).val(setVal);
-					}
-				}
-				this.setVariable = function() {
+                        $(this.selector).val(setVal);
+                    }
+                    break;
+            }
+        }
+
+        this.setVariable = function() {
+            switch (this.type) {
+                case Question.Types.TEXT:
 					if (variables[this.name] === undefined) {
 						variables[this.name] = $(this.selector).val();
-					}	
-				}
-				this.setDisability = function() {
+                    }	
+                    break;
+            }
+        }
+
+        this.setDisability = function() {
+            switch (this.type) {
+                case Question.Types.TEXT:
 					if (!this.visibleIf()) return;
 					if (this.disabledIf() === true) {
 						$(this.selector).prop('disabled', true);
@@ -172,32 +191,44 @@ class Question {
 					}
 					this.errors.forEach((e) => {
 						e.updateVisibility(true);
-					})
-				}
-				this.updateVisibility = function(page) {
-					if (this.visibleIf() === true && this.visible === false) {
-						this.visible = true;
-						page.showQuestion(this);
-					} else if (this.visibleIf() === false && this.visible === true) {
-						// set visible first because it is used to determine if parent divs need to be hidden
-						this.visible = false;
-						page.hideQuestion(this);
+                    })
+                    break;
+            }
+        }
+
+        this.updateVisibility = function() {
+            switch (this.type) {
+                case Question.Types.TEXT:
+					if (this.visibleIf() === true) {
+						this.page.showQuestion(this);
+					} else {
+						this.page.hideQuestion(this);
 					}
 					this.errors.forEach((e) => {
 						e.updateVisibility(true);
 					})
-				}
-				this.linkToVariable = function() {
+                    break;
+            }
+        }
+
+        this.linkToVariable = function() {
+            switch (this.type) {
+                case Question.Types.TEXT:
 					$(this.selector).keydown(debounce(
 						() => {
 							variables[this.name] = $(this.selector).val();
 						}, 250
-					));
-				}
-				this.visibilityDependants = [];
-				this.disabilityDependants = [];
-				this.linkToDependantQuestions = function(page) {
-					page.questions().forEach((q) => {
+                    ));
+                    break;
+            }
+        }
+        this.visibilityDependants = [];
+        this.disabilityDependants = [];
+
+        this.linkToDependantQuestions = function() {
+            switch (this.type) {
+                case Question.Types.TEXT:
+					this.page.questions().forEach((q) => {
 						if (q.visibleIf.toString().includes('variables["' + this.name + '"]')) {
 							this.visibilityDependants.push(q.name);
 						} 
@@ -209,7 +240,7 @@ class Question {
 						$(this.selector).keydown(debounce(
 							() => {
 								this.visibilityDependants.forEach((d) => {
-									page.questions().find((q) => {return q.name === d}).updateVisibility(page);
+									this.page.questions().find((q) => {return q.name === d}).updateVisibility();
 								})
 							}, 250
 						));
@@ -218,18 +249,24 @@ class Question {
 						$(this.selector).keydown(debounce(
 							() => {
 								this.disabilityDependants.forEach((d) => {
-									page.questions().find((q) => {return q.name === d}).setDisability();
+									this.page.questions().find((q) => {return q.name === d}).setDisability();
 								})
 							}, 250
 						));
-					}
-				}
-				this.errors = [];
-				this.linkToErrors = function(page) {
-					page.errors().forEach((e) => {
-						if (e.logicVisibleIf.toString().includes('variables["' + this.name + '"]')) {
-							this.errors.push(e);
-						}
+                    }
+                    break;
+            }
+        }
+
+        this.errors = [];
+
+        this.linkToErrors = function() {
+            switch (this.type) {
+                case Question.Types.TEXT:
+					this.page.errors().forEach((e) => {
+                        if (e.questions.indexOf(this) !== -1) {
+                            this.errors.push(e);
+                        }
 					});
 					if (this.errors.length !== 0) {
 						$(this.selector).keydown(debounce(
@@ -238,10 +275,14 @@ class Question {
 									e.updateVisibility(true);
 								})
 							}, 250
-						));
-					}
-				}
-				break;
+                        ));
+                    }
+                    break;
+            }
+        }
+
+        /*
+		switch (this.type) {
 			case Question.Types.NUMBER:
 				this.isRequired = isRequired;
 				this.generateSkeletonHTML = function() {
@@ -347,7 +388,8 @@ class Question {
 					}
 				}
 				break;
-		}
+        }
+            */
 	}
 }
 Question.Types = {
@@ -356,111 +398,60 @@ Question.Types = {
 }
 
 Question.prototype.render = function() {
-	if (!this.visibleIf()) return "";
+	if (this.isAlreadyVisible()) return "";
 
 	var HTML = this.generateSkeletonHTML();
 	return HTML
 }
 Question.prototype.setProperties = function() {
-	this.setPlaceholder && this.setPlaceholder();
-	this.setDefaultValue && this.setDefaultValue();
-	this.setVariable && this.setVariable();
-	this.setDisability && this.setDisability();
+	this.setPlaceholder();
+	this.setDefaultValue();
+	this.setVariable();
+	this.setDisability();
 }
 
 class Page {
 	constructor({elements=[], visibleIf=true}) {
-		this.errorsInitialized = false;
-		this.elements = elements;
-		var templateSingularsToConvertIndices = [];
+		//this.errorsInitialized = false;
+        this.elements = elements;
 
-		this.findElement = (className) => {
+		this.findElements = (className=undefined) => {
 			const recurse = function(collection) {
 				var results = [];
 				for (var i in collection) {
-					if (collection[i].constructor.name === className) {
+					if (className === undefined || collection[i].constructor.name === className) {
 						results.push(collection[i]);
-					} else if (collection[i].constructor.name === "Div") {
+                    } 
+                    if (collection[i].constructor.name === "Div") {
 						results = results.concat(recurse(collection[i].children));
 					}
 				}
 				return results;
 			}
 			return recurse(this.elements);
-		}
+        }
+        this.findElements().forEach((e) => {
+            e.page = this;
+        })
+        
+        const qs = this.questions();
 
-		this.initializeErrors = (templates) => {
-			const qs = this.questions();
-			const recurse = (collection) => {
-				var i = 0;
-				while (i < collection.length) {
-					// find which to convert
-					var singularTemplate = undefined;
-					var insertBefore;
-					if (collection[i].constructor.name === "SingularTemplateError") {
-						singularTemplate = collection[i];
-						insertBefore = false;
-					} else if (collection[i].constructor.name === "Question") {
-						/* -- high priority template registration */
-						if (collection[i].isRequired === true) {
-							singularTemplate = new SingularTemplateError({
-								templateName: "required",
-								questionName: collection[i].name,
-							})
-							insertBefore = true;
-						}
-					}
-					if (singularTemplate !== undefined) {
-						// convert
-						const template = templates.find((temp) => {return temp.name === singularTemplate.templateName});
-						const linkedQuestion = this.findQuestionByName(singularTemplate.questionName, qs);
+        // push questions each error depends on in terms of state (visible/disabled)
+        const varRegex = /variables\["(.+?)"\]/g;
+        this.errors().forEach((e) => {
+            const fString = e.logicVisibleIf.toString();	
+            var match = varRegex.exec(fString);
+            while (match != null) {
+                e.questions.push(this.findQuestionByName(match[1], qs));
+                match = varRegex.exec(fString);
+            }
+        })
 
-						var visibleIfFuncString = template.visibleIfFuncStrings[linkedQuestion.type];
-						visibleIfFuncString = visibleIfFuncString.replace("variables[]", 'variables["' + linkedQuestion.name + '"]');
-
-						const singularError = new SingularError({
-							name: singularTemplate.templateName + singularTemplate.questionName,
-							message: template.message,
-							visibleIf: eval("(" + visibleIfFuncString + ")"),
-							appearOnChange: template.appearOnChange,
-						})
-
-						if (insertBefore === true) {
-							collection.splice(i, 0, singularError);
-							i ++;
-						} else {
-							collection[i] = singularError;
-						}
-					} else if (collection[i].constructor.name === "Div") {
-						recurse(collection[i].children);
-					}
-					i ++;
-				}
-			}
-			recurse(this.elements);
-
-			// push questions each error depends on in terms of state (visible/disabled)
-			const varRegex = /variables\["(.+?)"\]/g;
-			this.errors().forEach((e) => {
-				const fString = e.logicVisibleIf.toString();	
-				var match = varRegex.exec(fString);
-				while (match != null) {
-					e.questions.push(this.findQuestionByName(match[1], qs));
-					match = varRegex.exec(fString);
-				}
-			})
-
-			this.errorsInitialized = true;
-
-			this.errors().forEach((e) => {
-				e.page = this;
-			})
-		}
+        this.titles().forEach((t) => {
+            t.question = this.findQuestionByName(t.questionName, qs)
+        })
 
 		this.visibleIf = isFunction(visibleIf) ? visibleIf : function() {return visibleIf};
-		this.titles().forEach((t) => {
-			t.page = this;
-		})
 	}
 }
 Page.prototype.render = function(containerJQuery) {
@@ -468,65 +459,65 @@ Page.prototype.render = function(containerJQuery) {
 	containerJQuery.append(HTML);
 
 	// pass 1: put elements into the DOM
+    // If error conditions match but questions are disabled/hidden, then errors are still rendered
 	this.elements.forEach((elm) => {
-		$("#page").append(elm.render(this));
+        if (elm.visibleIf()) {
+            $("#page").append(elm.render());
+        }
 	})
 
 	// pass 2: set question properties
 	this.questions().forEach((q) => {
 		q.setProperties();
-		q.linkToVariable && q.linkToVariable();
-		q.linkToDependantQuestions && q.linkToDependantQuestions(this);
-		q.linkToErrors && q.linkToErrors(this);
+		q.linkToVariable();
+		q.linkToDependantQuestions();
+		q.linkToErrors();
 	})
 
+    // Hide errors that should not have been rendered in pass 1
 	this.errors().forEach((e) => {
 		e.updateVisibility(false);
 	})
 }
-Page.prototype.hideQuestion = function(question) {
-	this.hideElement(question);
-	const title = this.findTitleByQuestionName(question.name);
-	if (title !== undefined) {
-		title.visible = false;
-		this.hideElement(title);
-	}
-}
 Page.prototype.hideElement = function(element) {
+    if (!element.isAlreadyVisible()) return;
 	$(element.selector).remove();
 	var parentDiv = element;
 	do {
 		parentDiv = this.getParentDiv(parentDiv);
 		var hidden = true;
-		if (parentDiv !== undefined && parentDiv !== this && parentDiv.isEmpty()) {
+		if (parentDiv !== undefined && parentDiv !== this && parentDiv.visibleIf() === false) {
 			$(parentDiv.selector).remove();
-			parentDiv.visible = false;
 		} else {
 			hidden = false;
 		}
 	} while (hidden === true);
 }
 Page.prototype.showElement = function(element) {
+    if (element.isAlreadyVisible()) return;
 	var parentDiv = element;
-	var topElmToShow = element;
+    var topElmToShow = element;
 	do {
-		parentDiv = this.getParentDiv(parentDiv);
-		if (parentDiv !== this && parentDiv !== undefined && !parentDiv.visible) {
+        parentDiv = this.getParentDiv(parentDiv);
+        var done = parentDiv !== this && parentDiv !== undefined && parentDiv.isAlreadyVisible() === true;
+		if (!done) {
 			topElmToShow = parentDiv;
 		}
-	} while (parentDiv !== undefined && parentDiv !== this && !parentDiv.visible);
+    } while (!done);
 
 	var collection = [];
 	if (parentDiv === undefined || parentDiv === this) {
 		collection = this.elements;
 	} else if (parentDiv.constructor.name === "Div") {
 		collection = parentDiv.children;
-	}
+    }
 
 	var pre = undefined;
 	for (i in collection) {
-		if (collection[i] === topElmToShow) break;
-		else if ((collection[i].visibleIf && collection[i].visibleIf()) || collection[i].visible) {
+		if (collection[i] === topElmToShow) {
+            break;
+        }
+		else if (collection[i].isAlreadyVisible()) {
 			pre = collection[i];
 		}
 	}
@@ -534,21 +525,28 @@ Page.prototype.showElement = function(element) {
 	if (pre === undefined) {
 		parentSelector.prepend(topElmToShow.render(this));
 	} else {
-		parentSelector.after(topElmToShow.render(this));
+		$(pre.selector).after(topElmToShow.render(this));
+	}
+}
+Page.prototype.hideQuestion = function(question) {
+	this.hideElement(question);
+	const title = this.findTitleByQuestionName(question.name);
+	if (title !== undefined) {
+		this.hideElement(title);
 	}
 }
 Page.prototype.showQuestion = function(question) {
 	const title = this.findTitleByQuestionName(question.name);
 	if (title !== undefined) {
-		title.visible = true;
 		this.showElement(title);
 	}
 	this.showElement(question);
 
 	question.setProperties();
-	question.linkToVariable && question.linkToVariable();
-	question.linkToDependantQuestions && question.linkToDependantQuestions(this);
-	question.linkToErrors && question.linkToErrors(this);
+	question.linkToVariable();
+	question.linkToDependantQuestions();
+    question.linkToErrors();
+    // at this point, error visibility has already been updated by the question
 }
 Page.prototype.getParentDiv = function(elm) {
 	const recurse = (source) => {
@@ -574,33 +572,14 @@ Page.prototype.getParentDiv = function(elm) {
 	}
 	return recurse(this);
 }
-/*
-Page.prototype.showQuestion = function(question) {
-	var prevElm = undefined;
-	for (var i = this.findQuestionIndex(question) - 1; i >= 0; i --) {
-		if (this.questions()[i].visibleIf()) {
-			prevElm = $(this.questions()[i].selector);
-			prevElm.after(question.render());
-			break;
-		}
-	}
-	if (!prevElm) {
-		prevElm = $("#page");
-		prevElm.prepend(question.render());
-	}
-	question.setProperties();
-	question.linkToVariable && question.linkToVariable();
-	question.linkToDependantQuestions && question.linkToDependantQuestions(this);
-	question.linkToErrors && question.linkToErrors(this);
-}*/
 Page.prototype.questions = function() {
-	return this.findElement("Question");
+	return this.findElements("Question");
 }
 Page.prototype.errors = function() {
-	return this.findElement("SingularError");
+	return this.findElements("Error");
 }
 Page.prototype.titles = function() {
-	return this.findElement("Title");
+	return this.findElements("Title");
 }
 
 Page.prototype.findQuestionIndex = function(question) {
@@ -618,19 +597,17 @@ Page.prototype.findTitleByQuestionName = function(qName) {
 }
 
 class Survey {
-	constructor({pages=[], templateErrors=[]}) {
+	constructor({pages=[]}) {
 		this.pages = pages;
-		this.templateErrors = templateErrors;
 	}
 }
 Survey.prototype.render = function(containerJQuery) {
 	const page = this.pages.find((p) => {
 		return p.visibleIf();
-	})
-	if (page.errorsInitialized === false) {
-		page.initializeErrors(this.templateErrors);
-	}
-	page.render(containerJQuery);
+    })
+    if (page !== undefined) {
+        page.render(containerJQuery);
+    }
 }
 
 function isFunction(functionToCheck) {
@@ -664,85 +641,50 @@ $(document).ready(function() {
 })
 
 
-
 //	constructor({name, message, appearOnChange=true, visibleIfFuncs={}}) {
 /// SURVEY
 const surveyJSON = {
-	templateErrors: [
-		new TemplateError({
-			name: "required",
-			message: "Missing required field",
-			appearOnChange: true,
-			visibleIfFuncStrings: {
-				[Question.Types.TEXT]: 'function() {return variables[] === ""}',
-				[Question.Types.NUMBER]: 'function() {return isNaN(variables[])}',
-			}
-		})
-	],
 	pages: [
-		new Page({
-			elements: [
-				new Div({
-					classes: ["row", "small-6 columns"],
-					children: [
-						/*
-						new SingularTemplateError ({
-							templateName: "required",
-							questionName: "left",
-						}),*/
-						new SingularError ({
-							name: "oops",
-							message: "oops you",
-							visibleIf: function() { return variables["left"] !== ""},
-							appearOnChange: true,
-						})
-					]
-				}),
-				new Div({
-					children: [
-						new Title({
-							text: "PLEASE WORK",
-							questionName: "left",
-						}),
-					]
-				}),
-				new Div({
-					classes: ["row", "small-6"],
-					children: [
-						new Div({
-							classes: ["small-6 columns"],
-							children: [new Div({
-								children: [
-									new Question({
-										type: Question.Types.TEXT,
-										placeholder: "left",
-										defaultValue: "",
-										visibleIf: function() {return variables["right"] !== 1},
-										disabledIf: function() {return variables["right"] !== 2},
-
-										name: "left",
-										isRequired: true
-									}),
-								],
-							}),
-							]
-						}),
-						new Div({
-							classes: ["small-6 columns"],
-							children: [
-								new Question({
-									type: Question.Types.NUMBER,
-									placeholder: "right",
-									visibleIf: function() {return variables["left"] !== "bye"},
-
-									name: "right",
-									isRequired: true
-								}),
-							],
-						})
-					]
-				}),
-			],
-		}),
-	],
+        new Page({
+            elements: [
+                new Div({
+                    children: [
+                        new Div({
+                            classes: ["green"],
+                            children: [
+                                new Error({
+                                    name: "Error1",
+                                    message: "Error 1",
+                                    logicVisibleIf: function() {return variables["q1"] === "false"}
+                                }),
+                            ]
+                        }),
+                        new Title({
+                            text: "TITLE",
+                            questionName: "q1"
+                        }),
+                        new Question({
+                            name: "q1",
+                            type: Question.Types.TEXT,
+                            visibleIf: function() {return variables["q2"] !== "q1"},
+                            disabledIf: function() {return variables["q3"] === "q3"}
+                        }),
+                        new Question({
+                            name: "q2",
+                            type: Question.Types.TEXT,
+                        }),
+                        new Error({
+                            name: "Error2",
+                            message: "Error 2",
+                            logicVisibleIf: function() {return variables["q1"] === "false" || variables["q3"] === "true"}
+                        }),
+                        new Question({
+                            name: "q3",
+                            type: Question.Types.TEXT,
+                        })
+                    ]
+                })
+            ]
+        })
+    ],
 }
