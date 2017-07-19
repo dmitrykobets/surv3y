@@ -41,12 +41,12 @@ Div.prototype.isEmpty = function() {
 	return empty;
 }
 
-class Error {
+class SurveyError {
 	constructor({name, message, logicVisibleIf, appearOnChange=true}) {
 		this.name = name;
 		this.message = message;
 		if (!isFunction(logicVisibleIf)) {
-			throw Error ("Error visibility condition must be a function");
+			throw Error ("SurveyError visibility condition must be a function");
         }
 
 		this.id = name;
@@ -65,12 +65,12 @@ class Error {
 		this.questions = [];
 	}
 }
-Error.prototype.render = function() {
+SurveyError.prototype.render = function() {
 	if (this.isAlreadyVisible()) return "";
 	var HTML = "<div id='" + this.id + "' class='survey-error'>" + this.message + "</div>";
 	return HTML;
 }
-Error.prototype.isVisibleBasedOnQuestionState = function(onChange) {
+SurveyError.prototype.isVisibleBasedOnQuestionState = function(onChange) {
 	var shouldBeVisible = this.appearOnChange === true || onChange === false;
 	this.questions.forEach((q) => { // needs to be fixed -- right now, if ANY of the triggering questions are disabled/invisible, will remove this error even if remaining questions pass
 		if (q.disabledIf()) {
@@ -82,7 +82,7 @@ Error.prototype.isVisibleBasedOnQuestionState = function(onChange) {
     })
     return shouldBeVisible;
 }
-Error.prototype.updateVisibility = function(onChange=false) {
+SurveyError.prototype.updateVisibility = function(onChange=false) {
 	if (this.visibleIf(onChange) === true) {
 		this.page.showElement(this);
 	} else {
@@ -116,7 +116,7 @@ Title.prototype.render = function(page) {
 }
 
 class Question {
-	constructor ({type, name, visibleIf=true, placeholder, defaultValue, disabledIf=false}) {
+	constructor ({type, name, visibleIf=true, placeholder, defaultValue, disabledIf=false, options=undefined}) {
 		if (type === undefined) {
 			throw Error("Question missing type");
 		}
@@ -136,7 +136,13 @@ class Question {
 		this.inputId = "q_" + this.name + "_i";
         this.selector = "#" + this.inputId;
         
-
+		// RADIOGROUP
+		if (this.type === Question.Types.RADIOGROUP) {
+			if (options === undefined)  {
+				throw Error("Radiogroup '" + this.name + "' missing options");
+			}
+		}
+		this.options = options;
 
         this.generateSkeletonHTML = function() {
             switch (this.type) {
@@ -145,6 +151,12 @@ class Question {
 					return HTML;
 				case Question.Types.NUMBER:
 					var HTML = "<input id='" + this.inputId + "' type='number'/>"
+					return HTML;
+				case Question.Types.RADIOGROUP:
+					var HTML = "<div id='" + this.inputId + "'>";
+					this.options.forEach((o) => {
+						HTML += "<input type='radio' name='" + this.name + "' value='" + o.value + "' /> " + o.text;
+					})
 					return HTML;
             }
         }
@@ -174,25 +186,42 @@ class Question {
                         $(this.selector).val(setVal);
                     }
                     break;
+                case Question.Types.RADIOGROUP:
+					var setVal = variables[this.name];
+					if (setVal === undefined) {
+						this.options.forEach((o) => {
+							if (o.isDefault === true) {
+								$("[name='" + this.name + "'][value='" + o.value + "']").prop("checked", true);
+							}
+						})
+					} else {
+						$("[name='" + this.name + "'][value='" + setVal + "']").prop("checked", true);
+                    }
+                    break;
             }
         }
 
-        this.setVariable = function() {
+        this.initializeVariable = function() {
             switch (this.type) {
-                case Question.Types.TEXT:
+                case Question.Types.TEXT: // empty ""
 					if (variables[this.name] === undefined) {
 						variables[this.name] = $(this.selector).val();
                     }	
                     break;
-                case Question.Types.NUMBER:
+                case Question.Types.NUMBER: // empty NaN
 					if (variables[this.name] === undefined) {
 						variables[this.name] = parseFloat($(this.selector).val());
+                    }	
+                    break;
+                case Question.Types.RADIOGROUP: // empty undefined
+					if (variables[this.name] === undefined) {
+						variables[this.name] = $("[name='" + this.name + "']:checked").val();
                     }	
                     break;
             }
         }
 
-        this.setDisability = function() {
+        this.updateDisability = function() {
             switch (this.type) {
                 case Question.Types.NUMBER:
                 case Question.Types.TEXT:
@@ -206,11 +235,27 @@ class Question {
 						e.updateVisibility(true);
                     })
                     break;
+                case Question.Types.RADIOGROUP:
+					if (!this.visibleIf()) return;
+					if (this.disabledIf() === true) {
+						$(this.selector).children().each(function() {
+							$(this).prop('disabled', true);
+						})
+					} else if (this.disabledIf() === false) {
+						$(this.selector).children().each(function() {
+							$(this).prop('disabled', false);
+						})
+					}
+					this.errors.forEach((e) => {
+						e.updateVisibility(true);
+                    })
+                    break;
             }
         }
 
         this.updateVisibility = function() {
             switch (this.type) {
+				case Question.Types.RADIOGROUP:
 				case Question.Types.NUMBER:
 				case Question.Types.TEXT:
 					if (this.visibleIf() === true) {
@@ -227,6 +272,14 @@ class Question {
 
         this.linkToVariable = function() {
             switch (this.type) {
+				case Question.Types.RADIOGROUP:
+					const name = this.name;
+					$(this.selector).children().each(function() {
+						$(this).change(() => {
+							variables[name] = $(this).prop('value');
+						})
+					})
+					break;
                 case Question.Types.TEXT:
 					$(this.selector).keydown(debounce(
 						() => {
@@ -261,6 +314,30 @@ class Question {
 				}
 			});
             switch (this.type) {
+				case Question.Types.RADIOGROUP:
+					if (this.visibilityDependants.length !== 0) {
+						this.options.forEach((o) => {
+							$("[name='" + this.name + "'][value='" + o.value + "']").change(debounce(
+								() => {
+									this.visibilityDependants.forEach((d) => {
+										this.page.questions().find((q) => {return q.name === d}).updateVisibility();
+									})
+								}, 250
+							));
+						})
+					}
+					if (this.disabilityDependants.length !== 0) {
+						this.options.forEach((o) => {
+							$("[name='" + this.name + "'][value='" + o.value + "']").change(debounce(
+								() => {
+									this.disabilityDependants.forEach((d) => {
+										this.page.questions().find((q) => {return q.name === d}).updateDisability();
+									})
+								}, 250
+							));
+						})
+					}
+					break;
                 case Question.Types.NUMBER:
 					if (this.visibilityDependants.length !== 0) {
 						$(this.selector).change(debounce(
@@ -275,7 +352,7 @@ class Question {
 						$(this.selector).change(debounce(
 							() => {
 								this.disabilityDependants.forEach((d) => {
-									this.page.questions().find((q) => {return q.name === d}).setDisability();
+									this.page.questions().find((q) => {return q.name === d}).updateDisability();
 								})
 							}, 250
 						));
@@ -294,7 +371,7 @@ class Question {
 						$(this.selector).keydown(debounce(
 							() => {
 								this.disabilityDependants.forEach((d) => {
-									this.page.questions().find((q) => {return q.name === d}).setDisability();
+									this.page.questions().find((q) => {return q.name === d}).updateDisability();
 								})
 							}, 250
 						));
@@ -305,13 +382,24 @@ class Question {
 
         this.errors = [];
 
-        this.linkToErrors = function() {
+        this.linkToSurveyErrors = function() {
 			this.page.errors().forEach((e) => {
 				if (e.questions.indexOf(this) !== -1) {
 					this.errors.push(e);
 				}
 			});
             switch (this.type) {
+				case Question.Types.RADIOGROUP:
+					this.options.forEach((o) => {
+						$("[name='" + this.name + "'][value='" + o.value + "']").change(debounce(
+							() => {
+								this.errors.forEach((e) => {
+									e.updateVisibility(true);
+								})
+							}, 250
+						));
+					})
+					break;
 				case Question.Types.NUMBER:
 					if (this.errors.length !== 0) {
 						$(this.selector).change(debounce(
@@ -340,6 +428,7 @@ class Question {
 Question.Types = {
 	TEXT: "TEXT",
 	NUMBER: "NUMBER",
+	RADIOGROUP: "RADIOGROUP",
 }
 
 Question.prototype.render = function() {
@@ -351,8 +440,7 @@ Question.prototype.render = function() {
 Question.prototype.setProperties = function() {
 	this.setPlaceholder();
 	this.setDefaultValue();
-	this.setVariable();
-	this.setDisability();
+	this.initializeVariable();
 }
 
 class Page {
@@ -416,7 +504,11 @@ Page.prototype.render = function(containerJQuery) {
 		q.setProperties();
 		q.linkToVariable();
 		q.linkToDependantQuestions();
-		q.linkToErrors();
+		q.linkToSurveyErrors();
+	})
+	this.questions().forEach((q) => {
+		q.updateDisability();
+		q.updateVisibility();
 	})
 
     // Hide errors that should not have been rendered in pass 1
@@ -490,7 +582,9 @@ Page.prototype.showQuestion = function(question) {
 	question.setProperties();
 	question.linkToVariable();
 	question.linkToDependantQuestions();
-    question.linkToErrors();
+    question.linkToSurveyErrors();
+	question.updateDisability();
+	// don't need to update visibility, cause this is a direct product of that having been updated
     // at this point, error visibility has already been updated by the question
 }
 Page.prototype.getParentDiv = function(elm) {
@@ -521,7 +615,7 @@ Page.prototype.questions = function() {
 	return this.findElements("Question");
 }
 Page.prototype.errors = function() {
-	return this.findElements("Error");
+	return this.findElements("SurveyError");
 }
 Page.prototype.titles = function() {
 	return this.findElements("Title");
@@ -594,16 +688,18 @@ const surveyJSON = {
             elements: [
 				new Div({
 					children: [
-						new Error({
-							name: "num1error",
-							logicVisibleIf: function() {return variables["num1"] === 0},
-							message: "Num 1 cannot be 0",
+						new SurveyError({
+							name: "radioerror",
+							logicVisibleIf: function() {return variables["radio"] === "apple"},
+							message: "radio cannot be apple",
 						}),
 						new Question({
-							type: Question.Types.NUMBER,
-							placeholder: "feet",
-							name: "num1",
-							disabledIf: function() {return variables["q3"] !== "num1"}
+							type: Question.Types.RADIOGROUP,
+							name: "radio",
+							options: [
+								{value: "apple", text: "Apple"},
+								{value: "orange", text: "Orange"}
+							],
 						}),
 					],
 				}),
@@ -612,9 +708,9 @@ const surveyJSON = {
                         new Div({
                             classes: ["green"],
                             children: [
-                                new Error({
-                                    name: "Error1",
-                                    message: "Error 1",
+                                new SurveyError({
+                                    name: "SurveyError1",
+                                    message: "SurveyError 1",
                                     logicVisibleIf: function() {return variables["q1"] === "false"}
                                 }),
                             ]
@@ -627,20 +723,21 @@ const surveyJSON = {
                             name: "q1",
                             type: Question.Types.TEXT,
                             visibleIf: function() {return variables["q2"] !== "q1" && isNaN(variables["num1"])},
-                            disabledIf: function() {return variables["q3"] === "q3"}
+                            disabledIf: function() {return variables["q3"] === "hi"}
                         }),
                         new Question({
                             name: "q2",
                             type: Question.Types.TEXT,
                         }),
-                        new Error({
-                            name: "Error2",
-                            message: "Error 2",
+                        new SurveyError({
+                            name: "SurveyError2",
+                            message: "SurveyError 2",
                             logicVisibleIf: function() {return variables["q1"] === "false" || variables["q3"] === "true"}
                         }),
                         new Question({
 							name: "q3",
 							placeholder: "q3",
+							defaultValue: "hi",
                             type: Question.Types.TEXT,
                         })
                     ]
