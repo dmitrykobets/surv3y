@@ -116,7 +116,7 @@ Title.prototype.render = function(page) {
 }
 
 class Question {
-	constructor ({type, name, visibleIf=true, placeholder, defaultValue, disabledIf=false, options=undefined}) {
+	constructor ({type, name, visibleIf=true, placeholder, defaultValue, disabledIf=false, options=undefined, html=undefined}) {
 		if (type === undefined) {
 			throw Error("Question missing type");
 		}
@@ -144,8 +144,17 @@ class Question {
 		}
 		this.options = options;
 
+		if (this.type === Question.Types.HTML) {
+			if (html === undefined) {
+				throw Error("Html '" + this.name + "' missing html");
+			}
+		}
+		this.html = html;
+
         this.generateSkeletonHTML = function() {
             switch (this.type) {
+                case Question.Types.HTML:
+					return this.html
                 case Question.Types.TEXT:
 					var HTML = "<input id='" + this.inputId + "' type='text'/>"
 					return HTML;
@@ -560,6 +569,7 @@ Question.Types = {
 	RADIOGROUP: "RADIOGROUP",
 	CHECKBOX: "CHECKBOX",
 	DROPDOWN: "DROPDOWN",
+	HTML: "HTML",
 }
 
 Question.prototype.render = function() {
@@ -818,6 +828,15 @@ const surveyJSON = {
 	pages: [
         new Page({
             elements: [
+				new Div({
+					children: [
+						new Question({
+							name: "htmlq",
+							type: Question.Types.HTML,
+							html: "<h1>HI THEREe</h1>"
+						}),
+					]
+				}),
 				new Div({
 					children: [
 						
