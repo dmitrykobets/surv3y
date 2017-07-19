@@ -149,6 +149,9 @@ class Question {
                 case Question.Types.TEXT:
 					var HTML = "<input id='" + this.inputId + "' type='text'/>"
 					return HTML;
+                case Question.Types.DATE:
+					var HTML = "<input id='" + this.inputId + "' type='date'/>"
+					return HTML;
 				case Question.Types.NUMBER:
 					var HTML = "<input id='" + this.inputId + "' type='number'/>"
 					return HTML;
@@ -163,10 +166,9 @@ class Question {
         this.setPlaceholder = function() {
             if (placeholder !== undefined) {
                 switch (this.type) {
-                    case Question.Types.TEXT:
-                        $(this.selector).prop('placeholder', placeholder);
-                        break;
+                    case Question.Types.DATE:
                     case Question.Types.NUMBER:
+                    case Question.Types.TEXT:
                         $(this.selector).prop('placeholder', placeholder);
                         break;
                 }
@@ -175,6 +177,16 @@ class Question {
 
         this.setDefaultValue = function() {
             switch (this.type) {
+				case Question.Types.DATE:
+					var setVal = variables[this.name];
+					if (setVal === undefined) {
+						if (defaultValue !== undefined) {
+							$(this.selector).val(moment(defaultValue).format("YYYY-MM-DD"));
+						}
+					} else {
+                        $(this.selector).val(moment(variables[this.name]).format("YYYY-MM-DD"));
+                    }
+					break;
                 case Question.Types.NUMBER:
                 case Question.Types.TEXT:
 					var setVal = variables[this.name];
@@ -185,7 +197,7 @@ class Question {
 					} else {
                         $(this.selector).val(setVal);
                     }
-                    break;
+					break;
                 case Question.Types.RADIOGROUP:
 					var setVal = variables[this.name];
 					if (setVal === undefined) {
@@ -218,11 +230,17 @@ class Question {
 						variables[this.name] = $("[name='" + this.name + "']:checked").val();
                     }	
                     break;
+                case Question.Types.DATE: // empty NaN
+					if (variables[this.name] === undefined) {
+						variables[this.name] = moment($(this.selector).val());
+                    }	
+                    break;
             }
         }
 
         this.updateDisability = function() {
             switch (this.type) {
+                case Question.Types.DATE:
                 case Question.Types.NUMBER:
                 case Question.Types.TEXT:
 					if (!this.visibleIf()) return;
@@ -256,6 +274,7 @@ class Question {
         this.updateVisibility = function() {
             switch (this.type) {
 				case Question.Types.RADIOGROUP:
+				case Question.Types.DATE:
 				case Question.Types.NUMBER:
 				case Question.Types.TEXT:
 					if (this.visibleIf() === true) {
@@ -299,6 +318,18 @@ class Question {
 						}, 250
                     ));
                     break;
+                case Question.Types.DATE:
+					$(this.selector).keydown(debounce(
+						() => {
+							variables[this.name] = moment($(this.selector).val());
+						}, 250
+                    ));
+					$(this.selector).change(debounce(
+						() => {
+							variables[this.name] = moment($(this.selector).val());
+						}, 250
+                    ));
+                    break;
             }
         }
         this.visibilityDependants = [];
@@ -338,6 +369,7 @@ class Question {
 						})
 					}
 					break;
+                case Question.Types.DATE:
                 case Question.Types.NUMBER:
 					if (this.visibilityDependants.length !== 0) {
 						$(this.selector).change(debounce(
@@ -400,6 +432,7 @@ class Question {
 						));
 					})
 					break;
+				case Question.Types.DATE:
 				case Question.Types.NUMBER:
 					if (this.errors.length !== 0) {
 						$(this.selector).change(debounce(
@@ -428,6 +461,7 @@ class Question {
 Question.Types = {
 	TEXT: "TEXT",
 	NUMBER: "NUMBER",
+	DATE: "DATE",
 	RADIOGROUP: "RADIOGROUP",
 }
 
@@ -689,17 +723,13 @@ const surveyJSON = {
 				new Div({
 					children: [
 						new SurveyError({
-							name: "radioerror",
-							logicVisibleIf: function() {return variables["radio"] === "apple"},
-							message: "radio cannot be apple",
+							name: "daterequired",
+							logicVisibleIf: function() {return isNaN(variables["date"])},
+							message: "date cannot be empty",
 						}),
 						new Question({
-							type: Question.Types.RADIOGROUP,
-							name: "radio",
-							options: [
-								{value: "apple", text: "Apple"},
-								{value: "orange", text: "Orange"}
-							],
+							type: Question.Types.DATE,
+							name: "date",
 						}),
 					],
 				}),
