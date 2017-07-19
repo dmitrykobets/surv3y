@@ -155,6 +155,9 @@ class Question {
 				case Question.Types.NUMBER:
 					var HTML = "<input id='" + this.inputId + "' type='number'/>"
 					return HTML;
+                case Question.Types.CHECKBOX:
+					var HTML = "<input id='" + this.inputId + "' type='checkbox'/>"
+					return HTML;
 				case Question.Types.RADIOGROUP:
 					var HTML = "<div id='" + this.inputId + "'>";
 					this.options.forEach((o) => {
@@ -210,6 +213,16 @@ class Question {
 						$("[name='" + this.name + "'][value='" + setVal + "']").prop("checked", true);
                     }
                     break;
+				case Question.Types.CHECKBOX:
+					var setVal = variables[this.name];
+					if (setVal === undefined) {
+						if (defaultValue !== undefined) {
+							$(this.selector).prop('checked', defaultValue);
+						}
+					} else {
+						$(this.selector).prop('checked', setVal);
+                    }
+					break;
             }
         }
 
@@ -218,6 +231,11 @@ class Question {
                 case Question.Types.TEXT: // empty ""
 					if (variables[this.name] === undefined) {
 						variables[this.name] = $(this.selector).val();
+                    }	
+                    break;
+                case Question.Types.CHECKBOX: // empty false
+					if (variables[this.name] === undefined) {
+						variables[this.name] = $(this.selector).is(":checked");
                     }	
                     break;
                 case Question.Types.NUMBER: // empty NaN
@@ -240,6 +258,7 @@ class Question {
 
         this.updateDisability = function() {
             switch (this.type) {
+                case Question.Types.CHECKBOX:
                 case Question.Types.DATE:
                 case Question.Types.NUMBER:
                 case Question.Types.TEXT:
@@ -274,6 +293,7 @@ class Question {
         this.updateVisibility = function() {
             switch (this.type) {
 				case Question.Types.RADIOGROUP:
+				case Question.Types.CHECKBOX:
 				case Question.Types.DATE:
 				case Question.Types.NUMBER:
 				case Question.Types.TEXT:
@@ -299,6 +319,13 @@ class Question {
 						})
 					})
 					break;
+                case Question.Types.CHECKBOX:
+					$(this.selector).change(debounce(
+						() => {
+							variables[this.name] = $(this.selector).is(":checked");
+						}, 250
+                    ));
+                    break;
                 case Question.Types.TEXT:
 					$(this.selector).keydown(debounce(
 						() => {
@@ -370,6 +397,7 @@ class Question {
 					}
 					break;
                 case Question.Types.DATE:
+                case Question.Types.CHECKBOX:
                 case Question.Types.NUMBER:
 					if (this.visibilityDependants.length !== 0) {
 						$(this.selector).change(debounce(
@@ -432,6 +460,17 @@ class Question {
 						));
 					})
 					break;
+				case Question.Types.CHECKBOX:
+					if (this.errors.length !== 0) {
+						$(this.selector).change(debounce(
+							() => {
+								this.errors.forEach((e) => {
+									e.updateVisibility(true);
+								})
+							}, 250
+                        ));
+					}
+					break;
 				case Question.Types.DATE:
 				case Question.Types.NUMBER:
 					if (this.errors.length !== 0) {
@@ -463,6 +502,7 @@ Question.Types = {
 	NUMBER: "NUMBER",
 	DATE: "DATE",
 	RADIOGROUP: "RADIOGROUP",
+	CHECKBOX: "CHECKBOX",
 }
 
 Question.prototype.render = function() {
@@ -723,13 +763,18 @@ const surveyJSON = {
 				new Div({
 					children: [
 						new SurveyError({
-							name: "daterequired",
-							logicVisibleIf: function() {return isNaN(variables["date"])},
-							message: "date cannot be empty",
+							name: "cbrequired",
+							logicVisibleIf: function() {return variables["cb"] === false},
+							message: "checkbox cannot be empty",
+						}),
+						new Title({
+							text: "checkbox",
+							questionName: "cb",
 						}),
 						new Question({
-							type: Question.Types.DATE,
-							name: "date",
+							type: Question.Types.CHECKBOX,
+							name: "cb",
+							disabledIf: function() {return variables["cb"] === true}
 						}),
 					],
 				}),
