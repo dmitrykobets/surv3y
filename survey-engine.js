@@ -143,6 +143,9 @@ class Question {
                 case Question.Types.TEXT:
 					var HTML = "<input id='" + this.inputId + "' type='text'/>"
 					return HTML;
+				case Question.Types.NUMBER:
+					var HTML = "<input id='" + this.inputId + "' type='number'/>"
+					return HTML;
             }
         }
         this.setPlaceholder = function() {
@@ -151,12 +154,16 @@ class Question {
                     case Question.Types.TEXT:
                         $(this.selector).prop('placeholder', placeholder);
                         break;
+                    case Question.Types.NUMBER:
+                        $(this.selector).prop('placeholder', placeholder);
+                        break;
                 }
             }
         }
 
         this.setDefaultValue = function() {
             switch (this.type) {
+                case Question.Types.NUMBER:
                 case Question.Types.TEXT:
 					var setVal = variables[this.name];
 					if (setVal === undefined) {
@@ -177,11 +184,17 @@ class Question {
 						variables[this.name] = $(this.selector).val();
                     }	
                     break;
+                case Question.Types.NUMBER:
+					if (variables[this.name] === undefined) {
+						variables[this.name] = parseFloat($(this.selector).val());
+                    }	
+                    break;
             }
         }
 
         this.setDisability = function() {
             switch (this.type) {
+                case Question.Types.NUMBER:
                 case Question.Types.TEXT:
 					if (!this.visibleIf()) return;
 					if (this.disabledIf() === true) {
@@ -198,7 +211,8 @@ class Question {
 
         this.updateVisibility = function() {
             switch (this.type) {
-                case Question.Types.TEXT:
+				case Question.Types.NUMBER:
+				case Question.Types.TEXT:
 					if (this.visibleIf() === true) {
 						this.page.showQuestion(this);
 					} else {
@@ -220,22 +234,53 @@ class Question {
 						}, 250
                     ));
                     break;
+                case Question.Types.NUMBER:
+					$(this.selector).keydown(debounce(
+						() => {
+							variables[this.name] = parseFloat($(this.selector).val());
+						}, 250
+                    ));
+					$(this.selector).change(debounce(
+						() => {
+							variables[this.name] = parseFloat($(this.selector).val());
+						}, 250
+                    ));
+                    break;
             }
         }
         this.visibilityDependants = [];
         this.disabilityDependants = [];
 
         this.linkToDependantQuestions = function() {
+			this.page.questions().forEach((q) => {
+				if (q.visibleIf.toString().includes('variables["' + this.name + '"]')) {
+					this.visibilityDependants.push(q.name);
+				} 
+				if (q.disabledIf.toString().includes('variables["' + this.name + '"]')) {
+					this.disabilityDependants.push(q.name);
+				}
+			});
             switch (this.type) {
-                case Question.Types.TEXT:
-					this.page.questions().forEach((q) => {
-						if (q.visibleIf.toString().includes('variables["' + this.name + '"]')) {
-							this.visibilityDependants.push(q.name);
-						} 
-						if (q.disabledIf.toString().includes('variables["' + this.name + '"]')) {
-							this.disabilityDependants.push(q.name);
-						}
-					});
+                case Question.Types.NUMBER:
+					if (this.visibilityDependants.length !== 0) {
+						$(this.selector).change(debounce(
+							() => {
+								this.visibilityDependants.forEach((d) => {
+									this.page.questions().find((q) => {return q.name === d}).updateVisibility();
+								})
+							}, 250
+						));
+					}
+					if (this.disabilityDependants.length !== 0) {
+						$(this.selector).change(debounce(
+							() => {
+								this.disabilityDependants.forEach((d) => {
+									this.page.questions().find((q) => {return q.name === d}).setDisability();
+								})
+							}, 250
+						));
+					}
+				case Question.Types.TEXT:
 					if (this.visibilityDependants.length !== 0) {
 						$(this.selector).keydown(debounce(
 							() => {
@@ -254,20 +299,30 @@ class Question {
 							}, 250
 						));
                     }
-                    break;
+					break;
             }
         }
 
         this.errors = [];
 
         this.linkToErrors = function() {
+			this.page.errors().forEach((e) => {
+				if (e.questions.indexOf(this) !== -1) {
+					this.errors.push(e);
+				}
+			});
             switch (this.type) {
+				case Question.Types.NUMBER:
+					if (this.errors.length !== 0) {
+						$(this.selector).change(debounce(
+							() => {
+								this.errors.forEach((e) => {
+									e.updateVisibility(true);
+								})
+							}, 250
+                        ));
+                    }
                 case Question.Types.TEXT:
-					this.page.errors().forEach((e) => {
-                        if (e.questions.indexOf(this) !== -1) {
-                            this.errors.push(e);
-                        }
-					});
 					if (this.errors.length !== 0) {
 						$(this.selector).keydown(debounce(
 							() => {
@@ -277,119 +332,9 @@ class Question {
 							}, 250
                         ));
                     }
-                    break;
+					break;
             }
         }
-
-        /*
-		switch (this.type) {
-			case Question.Types.NUMBER:
-				this.isRequired = isRequired;
-				this.generateSkeletonHTML = function() {
-					var HTML = "<input id='" + this.inputId + "' type='number'/>"
-					return HTML;
-				}
-				if (placeholder !== undefined) {
-					this.setPlaceholder = function() {
-						$(this.selector).prop('placeholder', placeholder);
-					}
-				}
-				this.setDefaultValue = function() {
-					var setVal = variables[this.name];
-					if (setVal === undefined) {
-						if (defaultValue !== undefined) {
-							$(this.selector).val(defaultValue);
-						}
-					} else {
-						$(this.selector).val(setVal);
-					}
-				}
-				this.setVariable = function() {
-					if (variables[this.name] === undefined) {
-						variables[this.name] = parseInt($(this.selector).val());
-					}	
-				}
-				this.setDisability = function() {
-					if (!this.visibleIf()) return;
-					if (this.disabledIf() === true) {
-						$(this.selector).prop('disabled', true);
-					} else if (this.disabledIf() === false) {
-						$(this.selector).prop('disabled', false);
-					}
-					this.errors.forEach((e) => {
-						e.updateVisibility(true);
-					})
-				}
-				this.updateVisibility = function(page) {
-					if (this.visibleIf() === true && this.visible === false) {
-						this.visible = true;
-						page.showQuestion(this);
-					} else if (this.visibleIf() === false && this.visible === true) {
-						// set visible first because it is used to determine if parent divs need to be hidden
-						this.visible = false;
-						page.hideQuestion(this);
-					}
-					this.errors.forEach((e) => {
-						e.updateVisibility(true);
-					})
-				}
-				this.linkToVariable = function() {
-					$(this.selector).keydown(debounce(
-						() => {
-							variables[this.name] = parseInt($(this.selector).val());
-						}, 250
-					));
-				}
-				this.visibilityDependants = [];
-				this.disabilityDependants = [];
-				this.linkToDependantQuestions = function(page) {
-					page.questions().forEach((q) => {
-						if (q.visibleIf.toString().includes('variables["' + this.name + '"]')) {
-							this.visibilityDependants.push(q.name);
-						} 
-						if (q.disabledIf.toString().includes('variables["' + this.name + '"]')) {
-							this.disabilityDependants.push(q.name);
-						}
-					});
-					if (this.visibilityDependants.length !== 0) {
-						$(this.selector).keydown(debounce(
-							() => {
-								this.visibilityDependants.forEach((d) => {
-									page.questions().find((q) => {return q.name === d}).updateVisibility(page);
-								})
-							}, 250
-						));
-					}
-					if (this.disabilityDependants.length !== 0) {
-						$(this.selector).keydown(debounce(
-							() => {
-								this.disabilityDependants.forEach((d) => {
-									page.questions().find((q) => {return q.name === d}).setDisability();
-								})
-							}, 250
-						));
-					}
-				}
-				this.errors = [];
-				this.linkToErrors = function(page) {
-					page.errors().forEach((e) => {
-						if (e.logicVisibleIf.toString().includes('variables["' + this.name + '"]')) {
-							this.errors.push(e);
-						}
-					});
-					if (this.errors.length !== 0) {
-						$(this.selector).keydown(debounce(
-							() => {
-								this.errors.forEach((e) => {
-									e.updateVisibility(true);
-								})
-							}, 250
-						));
-					}
-				}
-				break;
-        }
-            */
 	}
 }
 Question.Types = {
@@ -498,12 +443,12 @@ Page.prototype.showElement = function(element) {
 	var parentDiv = element;
     var topElmToShow = element;
 	do {
-        parentDiv = this.getParentDiv(parentDiv);
-        var done = parentDiv !== this && parentDiv !== undefined && parentDiv.isAlreadyVisible() === true;
+		parentDiv = this.getParentDiv(parentDiv);
+        var done = parentDiv === this || parentDiv === undefined || parentDiv.isAlreadyVisible() === true;
 		if (!done) {
 			topElmToShow = parentDiv;
 		}
-    } while (!done);
+	} while (!done);
 
 	var collection = [];
 	if (parentDiv === undefined || parentDiv === this) {
@@ -647,6 +592,21 @@ const surveyJSON = {
 	pages: [
         new Page({
             elements: [
+				new Div({
+					children: [
+						new Error({
+							name: "num1error",
+							logicVisibleIf: function() {return variables["num1"] === 0},
+							message: "Num 1 cannot be 0",
+						}),
+						new Question({
+							type: Question.Types.NUMBER,
+							placeholder: "feet",
+							name: "num1",
+							disabledIf: function() {return variables["q3"] !== "num1"}
+						}),
+					],
+				}),
                 new Div({
                     children: [
                         new Div({
@@ -666,7 +626,7 @@ const surveyJSON = {
                         new Question({
                             name: "q1",
                             type: Question.Types.TEXT,
-                            visibleIf: function() {return variables["q2"] !== "q1"},
+                            visibleIf: function() {return variables["q2"] !== "q1" && isNaN(variables["num1"])},
                             disabledIf: function() {return variables["q3"] === "q3"}
                         }),
                         new Question({
@@ -679,7 +639,8 @@ const surveyJSON = {
                             logicVisibleIf: function() {return variables["q1"] === "false" || variables["q3"] === "true"}
                         }),
                         new Question({
-                            name: "q3",
+							name: "q3",
+							placeholder: "q3",
                             type: Question.Types.TEXT,
                         })
                     ]
