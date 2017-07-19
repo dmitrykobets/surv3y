@@ -654,7 +654,7 @@ Page.prototype.render = function(containerJQuery) {
 
     // Hide errors that should not have been rendered in pass 1
 	this.errors().forEach((e) => {
-		e.updateVisibility(false);
+		e.updateVisibility(true);
 	})
 }
 Page.prototype.hideElement = function(element) {
@@ -763,6 +763,17 @@ Page.prototype.titles = function() {
 	return this.findElements("Title");
 }
 
+Page.prototype.runValidators = function() {
+	var noErrors = true;
+	this.errors().forEach((e) => {
+		e.updateVisibility(false);
+		if (e.visibleIf()) {
+			noErrors = false;
+		}
+	})
+	return noErrors;
+}
+
 Page.prototype.findQuestionIndex = function(question) {
 	return this.questions().indexOf(question);
 }
@@ -778,17 +789,72 @@ Page.prototype.findTitleByQuestionName = function(qName) {
 }
 
 class Survey {
-	constructor({pages=[]}) {
+	constructor({pages=[], containerJQuery=undefined}) {
 		this.pages = pages;
+		this.currentPageIdx = 0;
+		if (containerJQuery === undefined) {
+			throw Error("Missing container for survey")
+		}
+		this.containerJQuery = containerJQuery;
 	}
 }
-Survey.prototype.render = function(containerJQuery) {
-	const page = this.pages.find((p) => {
-		return p.visibleIf();
-    })
+Survey.prototype.render = function() {
+	this.containerJQuery.empty();
+
+	while (this.currentPageIdx < this.pages.length && this.pages[this.currentPageIdx].visibleIf() === false) {
+		currentPageIdx ++;
+	}
+	const page = this.currentPageIdx === this.pages.length ? undefined : this.pages[this.currentPageIdx]	
     if (page !== undefined) {
-        page.render(containerJQuery);
-    }
+        page.render(this.containerJQuery);
+	}
+
+	var NAV = "<div id='nav'>";
+
+	if (this.currentPageIdx !== 0) {
+		NAV += "<input id='prev-btn' type='button' class='button' value='Previous'/>"	
+	}
+	NAV += "<input id='next-btn' type='button' class='button' value='Next'/>"	
+	$("#page").after(NAV)
+	$("#prev-btn").click(() => {
+		this.goToPrevPage();
+	})
+
+	$("#next-btn").click(() => {
+		this.attemptToGoToNextPage();
+	})
+}
+Survey.prototype.attemptToGoToNextPage = function() {
+	const noErrors = this.currentPage().runValidators(true);
+	if (noErrors) {
+		this.goToNextPage();
+	}
+}
+Survey.prototype.goToNextPage = function() {
+	do {
+		this.currentPageIdx ++;
+	} while (this.currentPageIdx !== this.pages.length && this.currentPage().visibleIf() === false);
+
+	if (this.currentPageIdx === this.pages.length) {
+		this.currentPageIdx --;
+		//this.onComplete();
+	} else {
+		this.render();
+		//this.onNextPage();
+	}
+}
+Survey.prototype.goToPrevPage = function() {
+	if (this.currentPageIdx === 0) return;
+	do {
+		this.currentPageIdx --;
+	} while (this.currentPageIdx > 0 && this.currentPage().visibleIf() === false);
+
+	this.render();
+	//this.onPreviousPage();
+}
+
+Survey.prototype.currentPage = function() {
+	return this.pages[this.currentPageIdx];
 }
 
 function isFunction(functionToCheck) {
@@ -817,8 +883,8 @@ function debounce(func, wait, immediate) {
 
 var survey;
 $(document).ready(function() {
- 	survey = new Survey(surveyJSON)
-	survey.render($("#surveyContainer"));
+ 	survey = new Survey({pages: surveyJSON.pages, containerJQuery: $("#surveyContainer")})
+	survey.render();
 })
 
 
@@ -844,6 +910,7 @@ const surveyJSON = {
 							name: "dbreq",
 							logicVisibleIf: function() {return variables["dd"] === "empty"},
 							message: "dropdown cannot be empty",
+							appearOnChange: false,
 						}),
 						new Question({
 							type: Question.Types.DROPDOWN,
@@ -899,6 +966,19 @@ const surveyJSON = {
                     ]
                 })
             ]
+        }),
+        new Page({
+            elements: [
+				new Div({
+					children: [
+						new Question({
+							name: "htmlr",
+							type: Question.Types.HTML,
+							html: "<h1>next page</h1>"
+						}),
+					]
+				}),
+			],
         })
     ],
 }
