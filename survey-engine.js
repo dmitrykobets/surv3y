@@ -137,7 +137,7 @@ class Question {
         this.selector = "#" + this.inputId;
         
 		// RADIOGROUP
-		if (this.type === Question.Types.RADIOGROUP) {
+		if (this.type === Question.Types.RADIOGROUP || this.type === Question.Types.DROPDOWN) {
 			if (options === undefined)  {
 				throw Error("Radiogroup '" + this.name + "' missing options");
 			}
@@ -157,6 +157,13 @@ class Question {
 					return HTML;
                 case Question.Types.CHECKBOX:
 					var HTML = "<input id='" + this.inputId + "' type='checkbox'/>"
+					return HTML;
+                case Question.Types.DROPDOWN:
+					var HTML = "<select id='" + this.inputId + "'>"
+					this.options.forEach((o) => {
+						HTML += "<option value='" + o.value + "'>" + o.text + "</option>"
+					})
+					HTML += "</select>"
 					return HTML;
 				case Question.Types.RADIOGROUP:
 					var HTML = "<div id='" + this.inputId + "'>";
@@ -199,6 +206,18 @@ class Question {
 						}
 					} else {
                         $(this.selector).val(setVal);
+                    }
+					break;
+                case Question.Types.DROPDOWN:
+					var setVal = variables[this.name];
+					if (setVal === undefined) {
+						this.options.forEach((o) => {
+							if (o.isDefault === true) {
+								$(this.selector).val(o.value);
+							}
+						})
+					} else {
+						$(this.selector).val(setVal);
                     }
 					break;
                 case Question.Types.RADIOGROUP:
@@ -253,6 +272,11 @@ class Question {
 						variables[this.name] = moment($(this.selector).val());
                     }	
                     break;
+                case Question.Types.DROPDOWN: // empty DOES NOT EXIST -- can use a custom field like 'empty' which says 'Choose one...'
+					if (variables[this.name] === undefined) {
+						variables[this.name] = $(this.selector).val();
+                    }	
+                    break;
             }
         }
 
@@ -261,6 +285,7 @@ class Question {
                 case Question.Types.CHECKBOX:
                 case Question.Types.DATE:
                 case Question.Types.NUMBER:
+                case Question.Types.DROPDOWN:
                 case Question.Types.TEXT:
 					if (!this.visibleIf()) return;
 					if (this.disabledIf() === true) {
@@ -293,6 +318,7 @@ class Question {
         this.updateVisibility = function() {
             switch (this.type) {
 				case Question.Types.RADIOGROUP:
+				case Question.Types.DROPDOWN:
 				case Question.Types.CHECKBOX:
 				case Question.Types.DATE:
 				case Question.Types.NUMBER:
@@ -319,6 +345,13 @@ class Question {
 						})
 					})
 					break;
+                case Question.Types.DROPDOWN:
+					$(this.selector).change(debounce(
+						() => {
+							variables[this.name] = $(this.selector).val();
+						}, 250
+                    ));
+                    break;
                 case Question.Types.CHECKBOX:
 					$(this.selector).change(debounce(
 						() => {
@@ -363,6 +396,8 @@ class Question {
         this.disabilityDependants = [];
 
         this.linkToDependantQuestions = function() {
+			this.visibilityDependants = [];
+			this.disabilityDependants = [];
 			this.page.questions().forEach((q) => {
 				if (q.visibleIf.toString().includes('variables["' + this.name + '"]')) {
 					this.visibilityDependants.push(q.name);
@@ -394,6 +429,26 @@ class Question {
 								}, 250
 							));
 						})
+					}
+					break;
+				case Question.Types.DROPDOWN:
+					if (this.visibilityDependants.length !== 0) {
+						$(this.selector).change(debounce(
+							() => {
+								this.visibilityDependants.forEach((d) => {
+									this.page.questions().find((q) => {return q.name === d}).updateVisibility();
+								})
+							}, 250
+						));
+					}
+					if (this.disabilityDependants.length !== 0) {
+						$(this.selector).change(debounce(
+							() => {
+								this.disabilityDependants.forEach((d) => {
+									this.page.questions().find((q) => {return q.name === d}).updateDisability();
+								})
+							}, 250
+						));
 					}
 					break;
                 case Question.Types.DATE:
@@ -460,6 +515,7 @@ class Question {
 						));
 					})
 					break;
+				case Question.Types.DROPDOWN:
 				case Question.Types.CHECKBOX:
 					if (this.errors.length !== 0) {
 						$(this.selector).change(debounce(
@@ -503,6 +559,7 @@ Question.Types = {
 	DATE: "DATE",
 	RADIOGROUP: "RADIOGROUP",
 	CHECKBOX: "CHECKBOX",
+	DROPDOWN: "DROPDOWN",
 }
 
 Question.prototype.render = function() {
@@ -647,6 +704,7 @@ Page.prototype.hideQuestion = function(question) {
 	}
 }
 Page.prototype.showQuestion = function(question) {
+    if (question.isAlreadyVisible()) return;
 	const title = this.findTitleByQuestionName(question.name);
 	if (title !== undefined) {
 		this.showElement(title);
@@ -762,19 +820,23 @@ const surveyJSON = {
             elements: [
 				new Div({
 					children: [
+						
 						new SurveyError({
-							name: "cbrequired",
-							logicVisibleIf: function() {return variables["cb"] === false},
-							message: "checkbox cannot be empty",
-						}),
-						new Title({
-							text: "checkbox",
-							questionName: "cb",
+							name: "dbreq",
+							logicVisibleIf: function() {return variables["dd"] === "empty"},
+							message: "dropdown cannot be empty",
 						}),
 						new Question({
-							type: Question.Types.CHECKBOX,
-							name: "cb",
-							disabledIf: function() {return variables["cb"] === true}
+							type: Question.Types.DROPDOWN,
+							name: "dd",
+							options: [
+								{value: "empty", text: "Choose one..."},
+								{value: "notempty", text: "Option1"},
+								{value: "disabled", text: "Disable me"},
+								{value: "invisible", text: "Hide me"},
+							],
+							disabledIf: function() {return variables["dd"] === "disabled"},
+							visibleIf: function() {return variables["dd"] !== "invisible" || variables["q3"] === "dd"}
 						}),
 					],
 				}),
