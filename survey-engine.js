@@ -585,9 +585,13 @@ Question.prototype.setProperties = function() {
 }
 
 class Page {
-	constructor({elements=[], visibleIf=true}) {
+	constructor({elements=[], visibleIf=true, nextBtnText="Next", prevBtnText="Previous", nextIsVisible=true}) {
+		this.nextBtnText = nextBtnText;
+		this.prevBtnText = prevBtnText;
+		this.nextIsVisible = nextIsVisible;
+
 		//this.errorsInitialized = false;
-        this.elements = elements;
+		this.elements = elements;
 
 		this.findElements = (className=undefined) => {
 			const recurse = function(collection) {
@@ -812,10 +816,14 @@ Survey.prototype.render = function() {
 	var NAV = "<div id='nav'>";
 
 	if (this.currentPageIdx !== 0) {
-		NAV += "<input id='prev-btn' type='button' class='button' value='Previous'/>"	
+		NAV += "<input id='prev-btn' type='button' class='button' value='" + this.currentPage().prevBtnText + "'/>"	
 	}
-	NAV += "<input id='next-btn' type='button' class='button' value='Next'/>"	
+	if (this.currentPage().nextIsVisible === true) {
+		NAV += "<input id='next-btn' type='button' class='button' value='" + this.currentPage().nextBtnText + "'/>"	
+	}
+	NAV += "</div>"
 	$("#page").after(NAV)
+
 	$("#prev-btn").click(() => {
 		this.goToPrevPage();
 	})
@@ -965,7 +973,7 @@ const surveyJSON = {
                         })
                     ]
                 })
-            ]
+			],
         }),
         new Page({
             elements: [
