@@ -1,727 +1,1159 @@
-var variables = {};
+var variables = {} // a container of all questions in the survey -- see Question.linkToVariable() for initialization
 
-class Question {
-	constructor ({name, type, visibleIf = true, disabledIf = false, title, isRequired, validatorNames = [], dropdownOptions = [], checkboxOptions = [], radioOptions=[], html="", radioVertical=false}) {
-		this.name = name;
-		if (!variables.hasOwnProperty(name)) {
-			variables[name] = Question.getDefaultValueForType(type);		
+class Div {
+	/*
+		classes -- a list of css classes to apply to the element
+		children -- a list containing any of [Div, Question, Title, SurveyError]
+		removeIfEmpty -- whether or not to remove the `div` element from the page once all of its children are hidden/removed
+						 this is useful for foundation grid layouts, as an empty div will keep elements around it from moving
+	*/
+	constructor({classes=[], children=[], removeIfEmpty=true}) {
+		this.id = Div.count;
+		Div.count ++;
+		this.selector = "#" + this.id;
+
+		this.classes = classes;
+		this.children = children;
+		this.removeIfEmpty = removeIfEmpty;
+
+		this.visibleIf = function() {
+			//return !this.removeIfEmpty || this.isEmpty() === false;
+			return this.isEmpty() === false;
 		}
-		this.title = title;
+		this.isAlreadyVisible = function() {
+			if (this.removeIfEmpty === false) {
+				return $(this.selector).is(':visible') === true;
+			} else {
+				return $(this.selector).length !== 0;
+			}
+		}
+	}
+}
+Div.count = 0; // used as the id of each div
+
+Div.prototype.render = function() {
+	if (this.isAlreadyVisible()) return "";
+
+	var HTML = "<div id='" + this.id + "' class='" + this.classes.join(" ") + "'>";
+	this.children.forEach((c) => {
+		if (c.isAlreadyVisible() === false) {
+			if (c.visibleIf() === true || c.removeIfEmpty === false) {
+				HTML += c.render();
+			}
+			if (c.visibleIf() === false && c.removeIfEmpty === false) {
+				this.page.hideElement(c);
+			}
+		}
+	})
+	HTML += "</div>";
+	return HTML;
+}
+Div.prototype.isEmpty = function() {
+	var empty = true;
+	for (var i in this.children) {
+		if (this.children[i].constructor.name === "Div") {
+			empty = this.children[i].isEmpty() === true;
+		} else {
+			empty = this.children[i].visibleIf() === false;
+		}
+		if (empty === false) break;
+	}
+	return empty;
+}
+
+class SurveyError {
+	/*
+		logicVisibleIf -- a function which returns true if the error should be present based on the inputs that trigger it
+							example: An error indicating that 'isItYourBirthday' is a required field should return true here when 'isItYourBirthday' is empty
+		appearOnChange -- when false, this error only appears when the user presses the 'next' button; otherwise, the error appears as soon as the logicVisibleIf condition is true
+	*/
+	constructor({name, message, logicVisibleIf, appearOnChange=true}) {
+		this.name = name;
+		this.message = message;
+
+		this.id = name;
+		this.selector = "#" + this.id;
+
+		if (!isFunction(logicVisibleIf)) {
+			throw Error ("SurveyError visibility condition must be a function");
+		}
+		this.logicVisibleIf = logicVisibleIf;
+		this.visibleIf = () => {
+			return this.logicVisibleIf() && this.isVisibleBasedOnQuestionState();
+		}
+		this.isAlreadyVisible = function() {
+			return $(this.selector).length !== 0;
+		}
+
+		this.appearOnChange = appearOnChange;
+
+		// an array of questions that trigger this error
+		this.questions = [];
+	}
+}
+SurveyError.prototype.render = function() {
+	if (this.isAlreadyVisible()) return "";
+	var HTML = "<div id='" + this.id + "' class='survey-error'>" + this.message + "</div>";
+	return HTML;
+}
+SurveyError.prototype.isVisibleBasedOnQuestionState = function() {
+	var shouldBeVisible = this.appearOnChange === true || Page.onChange === false;
+	// needs to be fixed -- right now, if ANY of the triggering questions are disabled/invisible, the error will be removed even if remaining questions are visible/enabled.
+	// This does not currently affect the functionality of the app based on the referral workflow,
+	// but might start to if two questions that trigger the same error could become individually disabled/invisible
+	this.questions.forEach((q) => {
+		if (q.disabledIf()) {
+			shouldBeVisible = false;
+		}
+		if (!q.visibleIf()) {
+			shouldBeVisible = false;
+		}
+	})
+	return shouldBeVisible;
+}
+SurveyError.prototype.updateVisibility = function() {
+	if (this.visibleIf() === true) {
+		this.page.showElement(this);
+	} else {
+		this.page.hideElement(this);
+	}
+}
+// These classes are used in shore-survey.js and simply make it less verbose to make the same error pattern for different questions
+class RequiredTextError extends SurveyError {
+	constructor({questionName}) {
+		super({name: questionName + "_req", message: "Please fill in this field", logicVisibleIf: function() {return variables[questionName] === ""}, appearOnChange: false});
+	}
+}
+class RequiredDateError extends SurveyError {
+	constructor({questionName}) {
+		super({name: questionName + "_req", message: "Please fill in this field", logicVisibleIf: function() {return variables[questionName] === undefined || isNaN(moment(variables[questionName]))}, appearOnChange: false});
+	}
+}
+class RequiredNumberError extends SurveyError {
+	constructor({questionName}) {
+		super({name: questionName + "_req", message: "Please fill in this field", logicVisibleIf: function() {return isNaN(variables[questionName])}, appearOnChange: false});
+	}
+}
+class RequiredDropdownError extends SurveyError {
+	constructor({questionName, match}) {
+		super({name: questionName + "_req", message: "Please fill in this field", logicVisibleIf: function() {return variables[questionName] === match}, appearOnChange: false});
+	}
+}
+class RequiredRadiogroupError extends SurveyError {
+	constructor({questionName}) {
+		super({name: questionName + "_req", message: "Please fill in this field", logicVisibleIf: function() {return variables[questionName] === undefined}, appearOnChange: false});
+	}
+}
+class DateInFutureError extends SurveyError {
+	constructor({questionName}) {
+		super({name: questionName + "_dif", message: "Date should not be in the future", logicVisibleIf: function() {return moment(variables[questionName]).isAfter(moment())}, appearOnChange: true});
+	}
+}
+class NegativeNumberError extends SurveyError {
+	constructor({questionName}) {
+		super({name: questionName + "_neg", message: "Input should be positive", logicVisibleIf: function() {return variables[questionName] < 0}, appearOnChange: true});
+	}
+}
+
+class Title {
+	/*
+		questionName -- the name of the question that this title is describing
+	*/
+	constructor({text, tagName="h5", questionName}) {
+		this.text = text;
+		this.tagName = tagName;
+		this.questionName = questionName;
+
+		this.id = "title_" + questionName;
+		this.selector = "#" + this.id;
+
+		this.question = undefined; // a direct reference to the question this title is describing
+
+		this.visibleIf = () => {
+			if (this.question === undefined) {
+				throw Error("Title does not correspond to any question");
+			}
+			return this.question.visibleIf();
+		}
+		this.isAlreadyVisible = function() {
+			return $(this.selector).length !== 0;
+		}
+	}
+}
+Title.prototype.setQuestion = function(question) {
+	this.question = question;
+}
+Title.prototype.render = function() {
+	if (this.isAlreadyVisible()) return "";
+	return "<" + this.tagName + " id='" + this.id + "'>" + this.text + "</" + this.tagName + ">";
+}
+
+/* TODO:
+	- split up different question types
+*/
+class Question {
+	/*
+		type -- one of Question.Types
+		classes -- a list of css classes
+		isVertical -- applies to Question.Types.RADIOGROUP -- whether or not the radio buttons should be vertical
+		options -- a list of options for checkbox groups and radio groups -- {value, text, isDefault}
+		id -- applies to Question.Types.HTML -- the id to use for this element
+		html -- a string containing html for Question.Types.HTML
+			-- the html should contain the question's id so that the it can be properly hidden
+		dynamicHTML -- a function returning html for Question.Types.DYNAMIC_HTML
+		respondTo -- applies to Question.Types.DYNAMIC_HTML -- a list of question names which trigger this question's render method
+		checkboxText -- text to be displayed inline next to checkboxes -- an alternative to the Title element since checkbox names should not be standalone titles
+	*/
+	constructor ({type, name, classes=[], isVertical=false, visibleIf=true, placeholder, defaultValue, disabledIf=false, options=undefined, id=undefined, html=undefined, dynamicHTML=undefined, respondTo=[], checkboxText=undefined, ariaLabel=""}) {
+		if (type === undefined) {
+			throw Error("Question missing type");
+		}
 		this.type = type;
+		this.ariaLabel = ariaLabel;
+
 		this.visibleIf = isFunction(visibleIf) ? visibleIf : function() {return visibleIf};
+		this.isAlreadyVisible = function() {
+			return $(this.selector).length !== 0;
+		}
 		this.disabledIf = isFunction(disabledIf) ? disabledIf : function() {return disabledIf};
-		this.dependants = [];
 
-		this.containerId = "q_" + this.name;
-		this.errorsId = "e_" + this.name;
-		this.titleId = this.containerId + "_t";
-		this.inputId;
-		switch (this.type) {
-			case Question.Types.TEXT:
-				this.inputId = this.containerId + "_i";
-				break;
-			case Question.Types.NUMBER:
-				this.inputId = this.containerId + "_i";
-				break;
-			case Question.Types.CHECKBOX:
-				this.inputId = this.containerId + "_i";
-				break;
-			case Question.Types.DROPDOWN:
-				this.inputId = this.containerId + "_i";
-				break;
-			case Question.Types.CHECKBOXGROUP:
-				this.inputId = this.containerId + "_i";
-				break;
-			case Question.Types.RADIOGROUP:
-				this.inputId = this.containerId + "_i";
-				break;
-			case Question.Types.HTML:
-				this.inputId = this.containerId + "_h";
-				break;
-			case Question.Types.DATE:
-				this.inputId = this.containerId + "_i";
-				break;
-			default:
-				throw Error("Unsupported question type");
-		};
+		if (name === undefined) {
+			throw Error("Question missing name");
+		}
+		this.name = name;
 
-		this.containerSelector = "#" + this.containerId;
-		this.errorsSelector = "#" + this.errorsId;
-		this.titleSelector = "#" + this.titleId;
-		this.inputSelector = "#" + this.inputId;
+		this.classes = classes;
+		this.isVertical = isVertical;
+
+		if (this.type === Question.Types.CHECKBOX) {
+			if (checkboxText === undefined) {
+				throw Error("Missing text for checkbox: " + this.name);
+			}
+			this.checkboxText = checkboxText;
+		}
+
+		if (this.type === Question.Types.HTML || this.type === Question.Types.DYNAMIC_HTML) {
+			if (id === undefined) {
+				throw Error("Missing id for html: " + this.name);
+			}
+			this.inputId = id;
+		} else {
+			this.inputId = "q_" + this.name + "_i";
+		}
+		this.selector = "#" + this.inputId;
+
+		if (this.type === Question.Types.RADIOGROUP || this.type === Question.Types.DROPDOWN) {
+			if (options === undefined) {
+				throw Error("Missing options for: '" + this.name);
+			}
+		}
+		this.options = options;
+
+		if (this.type === Question.Types.HTML) {
+			if (html === undefined) {
+				throw Error("Html '" + this.name + "' missing html");
+			}
+		}
+		this.html = html;
+
+		if (this.type === Question.Types.DYNAMIC_HTML) {
+			if (dynamicHTML === undefined) {
+				throw Error("Dynamic HTML '" + this.name + "' missing dynamic html");
+			}
+			if (respondTo.length === 0) {
+				throw Error("Dynamic HTML '" + this.name + "' missing respondTo");
+			}
+		}
+		this.dynamicHTML = dynamicHTML;
+		this.respondTo = respondTo;
+
+		this.updateDynamicHTML = function() {
+			switch (this.type) {
+				case Question.Types.DYNAMIC_HTML:
+					this.page.hideQuestion(this);
+					this.page.showQuestion(this);
+			}
+		}
+
+		this.generateSkeletonHTML = function() {
+			switch (this.type) {
+				case Question.Types.HTML:
+					return this.html;
+				case Question.Types.DYNAMIC_HTML:
+					return this.dynamicHTML();
+				case Question.Types.TEXT:
+					var HTML = "<input id='" + this.inputId + "' type='text' aria-label='" + this.ariaLabel + "'/>"
+					return HTML;
+				case Question.Types.DATE:
+				    var HTML = "<input id='" + this.inputId + "' type='text' placeholder='YYYY-MM-DD' onfocus='blur();' aria-label='" + this.ariaLabel + "'/>"
+					return HTML;
+				case Question.Types.NUMBER:
+					var HTML = "<input id='" + this.inputId + "' class='" + this.classes.join(" ") + "' type='number' aria-label='" + this.ariaLabel + "'/>"
+					return HTML;
+				case Question.Types.CHECKBOX:
+					var HTML = "<label><input id='" + this.inputId + "' type='checkbox'>" + this.checkboxText + "</label>"
+					return HTML;
+				case Question.Types.DROPDOWN:
+					var HTML = "<select id='" + this.inputId + "'>"
+					this.options.forEach((o) => {
+						HTML += "<option value='" + o.value + "' aria-label='" + o.text + "'>" + o.text + "</option>"
+					})
+					HTML += "</select>"
+					return HTML;
+				case Question.Types.RADIOGROUP:
+					var HTML = "<div id='" + this.inputId + "'>";
+					this.options.forEach((o) => {
+						if (this.isVertical === true) {
+							HTML += "<label><input type='radio' name='" + this.name + "' value='" + o.value + "' /> " + o.text + "</label>";
+						} else {
+							HTML += "<label style='display:inline;margin-right:2rem;'><input type='radio' name='" + this.name + "' value='" + o.value + "' /> " + o.text + "</label>";
+						}
+					})
+					return HTML;
+			}
+		}
+
+		// Set the HTML element's placeholder
+		this.setPlaceholder = function() {
+			if (placeholder !== undefined) {
+				switch (this.type) {
+					case Question.Types.DATE:
+					case Question.Types.NUMBER:
+					case Question.Types.TEXT:
+						$(this.selector).prop('placeholder', placeholder);
+						break;
+				}
+			}
+		}
+
+		// Set the HTML element's default value
+		this.setDefaultValue = function() {
+			switch (this.type) {
+				case Question.Types.DATE:
+					var setVal = variables[this.name];
+					if (setVal === undefined) {
+						if (defaultValue !== undefined) {
+							$(this.selector).val(moment(defaultValue).format("YYYY-MM-DD"));
+						}
+					} else {
+							$(this.selector).val(moment(variables[this.name]).format("YYYY-MM-DD"));
+					}
+					break;
+				case Question.Types.NUMBER:
+				case Question.Types.TEXT:
+					var setVal = variables[this.name];
+					if (setVal === undefined) {
+						if (defaultValue !== undefined) {
+							$(this.selector).val(defaultValue);
+						}
+					} else {
+						$(this.selector).val(setVal);
+					}
+					break;
+				case Question.Types.DROPDOWN:
+					var setVal = variables[this.name];
+					if (setVal === undefined) {
+						this.options.forEach((o) => {
+							if (o.isDefault === true) {
+								$(this.selector).val(o.value);
+							}
+						})
+					} else {
+						$(this.selector).val(setVal);
+					}
+					break;
+				case Question.Types.RADIOGROUP:
+					var setVal = variables[this.name];
+					if (setVal === undefined) {
+						this.options.forEach((o) => {
+							if (o.isDefault === true) {
+								$("[name='" + this.name + "'][value='" + o.value + "']").prop("checked", true);
+							}
+						})
+					} else {
+						$("[name='" + this.name + "'][value='" + setVal + "']").prop("checked", true);
+					}
+					break;
+				case Question.Types.CHECKBOX:
+					var setVal = variables[this.name];
+					if (setVal === undefined) {
+						if (defaultValue !== undefined) {
+							$(this.selector).prop('checked', defaultValue);
+						}
+					} else {
+						$(this.selector).prop('checked', setVal);
+					}
+					break;
+			}
+		}
+
+		// Set the variables[...] entry for this Question
+		this.initializeVariable = function() {
+			switch (this.type) {
+				case Question.Types.TEXT: // if question is empty, variables[...] = ""
+					if (variables[this.name] === undefined) {
+						variables[this.name] = $(this.selector).val();
+					}
+					break;
+				case Question.Types.CHECKBOX: // if question is empty, variables[...] = false
+					if (variables[this.name] === undefined) {
+						variables[this.name] = $(this.selector).is(":checked");
+					}
+					break;
+				case Question.Types.NUMBER: // if question is empty, variables[...] = NaN
+					if (variables[this.name] === undefined) {
+						variables[this.name] = parseFloat($(this.selector).val());
+					}
+					break;
+				case Question.Types.RADIOGROUP: // if question is empty, variables[...] = undefined
+					if (variables[this.name] === undefined) {
+						variables[this.name] = $("[name='" + this.name + "']:checked").val();
+					}
+					break;
+				case Question.Types.DATE: // if question is empty, variables[...] = undefined
+					if (variables[this.name] === undefined) {
+						variables[this.name] = undefined;
+					}
+					break;
+				case Question.Types.DROPDOWN: // this question cannot be empty -- can delegate a specific option like 'Choose one...' as the role of an empty selection
+					if (variables[this.name] === undefined) {
+						variables[this.name] = $(this.selector).val();
+					}
+					break;
+			}
+		}
+
+		// enables/disables the Question
+		this.updateDisability = function() {
+			Page.onChange = true;
+			switch (this.type) {
+				case Question.Types.CHECKBOX:
+				case Question.Types.DATE:
+				case Question.Types.NUMBER:
+				case Question.Types.DROPDOWN:
+				case Question.Types.TEXT:
+					if (!this.visibleIf()) return;
+					if (this.disabledIf() === true) {
+						$(this.selector).prop('disabled', true);
+					} else if (this.disabledIf() === false) {
+						$(this.selector).prop('disabled', false);
+					}
+					this.errors.forEach((e) => {
+						e.updateVisibility();
+					})
+					break;
+				case Question.Types.RADIOGROUP:
+					if (!this.visibleIf()) return;
+					if (this.disabledIf() === true) {
+						this.options.forEach((o) => {
+							$("[name='" + this.name + "'][value='" + o.value + "']").prop('disabled', true);
+						})
+					} else if (this.disabledIf() === false) {
+						this.options.forEach((o) => {
+							$("[name='" + this.name + "'][value='" + o.value + "']").prop('disabled', false);
+						})
+					}
+					this.errors.forEach((e) => {
+						e.updateVisibility();
+					})
+					break;
+			}
+		}
+
+		// hide/show the Question
+		this.updateVisibility = function() {
+			Page.onChange = true;
+			switch (this.type) {
+				case Question.Types.HTML:
+				case Question.Types.DYNAMIC_HTML:
+					if (this.visibleIf() === true) {
+						this.page.showQuestion(this);
+					} else {
+						this.page.hideQuestion(this);
+					}
+					break;
+				case Question.Types.RADIOGROUP:
+				case Question.Types.DROPDOWN:
+				case Question.Types.CHECKBOX:
+				case Question.Types.DATE:
+				case Question.Types.NUMBER:
+				case Question.Types.TEXT:
+					if (this.visibleIf() === true) {
+						this.page.showQuestion(this);
+					} else {
+						this.page.hideQuestion(this);
+					}
+					// should update the errors once the questions have been shown/hidden
+					this.errors.forEach((e) => {
+						e.updateVisibility(true);
+					})
+					break;
+			}
+		}
+
+		// set events to update the Question's variables[...] entry when the Question's input is updated by the user
+		this.linkToVariable = function() {
+			switch (this.type) {
+				case Question.Types.RADIOGROUP:
+					this.options.forEach((o) => {
+						$("[name='" + this.name + "'][value='" + o.value + "']").change(() => {
+							variables[this.name] = $("[name='" + this.name + "'][value='" + o.value + "']").prop('value');
+						})
+					})
+					break;
+				case Question.Types.DROPDOWN:
+					$(this.selector).change(() => {
+						variables[this.name] = $(this.selector).val();
+					});
+					break;
+				case Question.Types.CHECKBOX:
+					$(this.selector).change(() => {
+						variables[this.name] = $(this.selector).is(":checked");
+					});
+					break;
+				case Question.Types.TEXT:
+					$(this.selector).keydown(() => {
+						const element = $(this.selector);
+						registerDebounce(() => {
+							variables[this.name] = element.val();
+						}, 250)
+					});
+					break;
+				case Question.Types.NUMBER:
+					$(this.selector).keydown(() => {
+						const element = $(this.selector);
+						registerDebounce(() => {
+							variables[this.name] = parseFloat(element.val());
+						}, 250);
+					});
+					$(this.selector).change(() => {
+						const element = $(this.selector);
+						registerDebounce(() => {
+							variables[this.name] = parseFloat(element.val());
+						}, 250)
+					})
+					break;
+				case Question.Types.DATE:
+					$(this.selector).keydown(() => {
+						const element = $(this.selector);
+						registerDebounce(() => {
+							const val = moment(element.val());
+							if (isNaN(val)) {
+								variables[this.name] = undefined;
+							} else {
+								variables[this.name] = val;
+							}
+						}, 250)
+					})
+					$(this.selector).change(() => {
+						const element = $(this.selector);
+						registerDebounce(() => {
+							const val = moment(element.val());
+							if (isNaN(val)) {
+								variables[this.name] = undefined;
+							} else {
+								variables[this.name] = val;
+							}
+						}, 250)
+					})
+					break;
+			}
+		}
+		// these arrays hold names of questions which directly depend on THIS question
+		// i.e., if "B" is within A.visibilityDependants, then whenever A's value changes, question B's visibility on the page is updated
+		this.visibilityDependants = [];
+		this.disabilityDependants = [];
+		this.dynamicHTMLDependants = [];
+
+		this.linkToDependantQuestions = function() {
+			this.visibilityDependants = [];
+			this.disabilityDependants = [];
+			this.dynamicHTMLDependants = [];
+
+			// visibilityDependants and disabilityDependants depend on the other question Q's visibleIf and disabledIf functions to contain variable[Q.name] within them
+			// this makes it less verbose to set up dependencies between questions. However, if there comes a time when this is insufficient, can use the `respondTo` approach
+			// (which was made much later) and force the questions constructors to contain lists of questions they depend on
+			this.page.questions().forEach((q) => {
+				if (q.visibleIf.toString().includes('variables["' + this.name + '"]')) {
+					this.visibilityDependants.push(q.name);
+				}
+				if (q.disabledIf.toString().includes('variables["' + this.name + '"]')) {
+					this.disabilityDependants.push(q.name);
+				}
+				if (q.respondTo.indexOf(this.name) !== -1) {
+					this.dynamicHTMLDependants.push(q.name);
+				}
+			});
+			switch (this.type) {
+				case Question.Types.RADIOGROUP:
+					if (this.visibilityDependants.length !== 0) {
+						this.options.forEach((o) => {
+							$("[name='" + this.name + "'][value='" + o.value + "']").change(() => {
+								this.visibilityDependants.forEach((d) => {
+									this.page.questions().find((q) => {return q.name === d}).updateVisibility();
+								})
+							});
+						})
+					}
+					if (this.disabilityDependants.length !== 0) {
+						this.options.forEach((o) => {
+							$("[name='" + this.name + "'][value='" + o.value + "']").change(() => {
+								this.disabilityDependants.forEach((d) => {
+									this.page.questions().find((q) => {return q.name === d}).updateDisability();
+								})
+							});
+						})
+					}
+					break;
+				case Question.Types.DROPDOWN:
+					if (this.visibilityDependants.length !== 0) {
+						$(this.selector).change(() => {
+							this.visibilityDependants.forEach((d) => {
+								this.page.questions().find((q) => {return q.name === d}).updateVisibility();
+							})
+						});
+					}
+					if (this.disabilityDependants.length !== 0) {
+						$(this.selector).change(() => {
+							this.disabilityDependants.forEach((d) => {
+								this.page.questions().find((q) => {return q.name === d}).updateDisability();
+							})
+						});
+					}
+					break;
+				case Question.Types.CHECKBOX:
+					if (this.visibilityDependants.length !== 0) {
+						$(this.selector).change(() => {
+							if (this.changed === true) {
+								this.changed = false;
+								return;
+							}
+							this.visibilityDependants.forEach((d) => {
+								this.page.questions().find((q) => {return q.name === d}).updateVisibility();
+							})
+						});
+					}
+					if (this.disabilityDependants.length !== 0) {
+						$(this.selector).change(() => {
+							this.disabilityDependants.forEach((d) => {
+								this.page.questions().find((q) => {return q.name === d}).updateDisability();
+							})
+						});
+					}
+				case Question.Types.DATE:
+				case Question.Types.NUMBER:
+					if (this.visibilityDependants.length !== 0) {
+						$(this.selector).change(() => {
+							registerDebounce(() => {
+								this.visibilityDependants.forEach((d) => {
+									this.page.questions().find((q) => {return q.name === d}).updateVisibility();
+								})
+							}, 250)
+						})
+					}
+					if (this.disabilityDependants.length !== 0) {
+						$(this.selector).change(() => {
+							registerDebounce(() => {
+								this.disabilityDependants.forEach((d) => {
+									this.page.questions().find((q) => {return q.name === d}).updateDisability();
+								})
+							}, 250)
+						})
+					}
+					if (this.dynamicHTMLDependants.length !== 0) {
+						$(this.selector).change(() => {
+							registerDebounce(() => {
+								this.dynamicHTMLDependants.forEach((d) => {
+									this.page.questions().find((q) => {return q.name === d}).updateDynamicHTML();
+								})
+							}, 250)
+						})
+					}
+				case Question.Types.TEXT:
+					if (this.visibilityDependants.length !== 0) {
+						$(this.selector).keydown(() => {
+							registerDebounce(() => {
+								this.visibilityDependants.forEach((d) => {
+									this.page.questions().find((q) => {return q.name === d}).updateVisibility();
+								})
+							}, 250)
+						})
+					}
+					if (this.disabilityDependants.length !== 0) {
+						$(this.selector).keydown(() => {
+							registerDebounce(() => {
+								this.disabilityDependants.forEach((d) => {
+									this.page.questions().find((q) => {return q.name === d}).updateDisability();
+								})
+							}, 250)
+						})
+					}
+					if (this.dynamicHTMLDependants.length !== 0) {
+						$(this.selector).keydown(() => {
+							registerDebounce(() => {
+								this.dynamicHTMLDependants.forEach((d) => {
+									this.page.questions().find((q) => {return q.name === d}).updateDynamicHTML();
+								})
+							}, 250)
+						})
+					}
+					break;
+			}
+		}
 
 		this.errors = [];
-		this.isRequired = isRequired;
-		this.validatorNames = validatorNames;
 
-		// DROPDOWN
-		this.dropdownOptions = dropdownOptions;
-
-		// CHECKBOX GROUP
-		this.checkboxOptions = checkboxOptions;
-		this.checkboxIdPrefix = this.inputId + "_c_";
-		this.checkboxSelectorPrefix = "#" + this.checkboxIdPrefix;
-		this.checkboxLabelIdPrefix = this.inputId + "_cl_";
-		this.checkboxLabelSelectorPrefix = "#" + this.checkboxLabelIdPrefix;
-
-		// RADIO GROUP
-		this.radioOptions = radioOptions;
-		this.radioIdPrefix = this.inputId + "_r_";
-		this.radioLabelIdPrefix = this.inputId + "_rl_";
-		this.radioSelectorPrefix = "#" + this.radioIdPrefix;
-		this.radioLabelSelectorPrefix = "#" + this.radioLabelIdPrefix;
-		this.radioVertical = radioVertical;
-
-		// HTML
-		this.html = html;
-	}
-}
-Question.Types = {TEXT: 0, NUMBER: 1, CHECKBOX: 2, DROPDOWN: 3, CHECKBOXGROUP: 4, RADIOGROUP: 5, HTML: 6, DATE: 7};
-Question.Validators = {NEGATIVENUMBER: 0, FUTUREDATE: 1};
-Question.prototype.getErrorId = function(e, i = -1) {
-	if (i === -1) {
-		i = this.errors.indexOf(e);
-	}
-	return this.containerId + "_e_" + i;
-}
-Question.prototype.getErrorSelector = function(e, i = -1) {
-	return "#" + this.getErrorId(e, i);
-}
-Question.prototype.generateHTML = function() {
-	switch (this.type) {
-		case Question.Types.TEXT:
-			return this.generateTextHTML();
-		case Question.Types.NUMBER:
-			return this.generateNumberHTML();
-		case Question.Types.CHECKBOX:
-			return this.generateCheckboxHTML();
-		case Question.Types.DROPDOWN:
-			return this.generateDropdownHTML();
-		case Question.Types.CHECKBOXGROUP:
-			return this.generateCheckboxgroupHTML();
-		case Question.Types.RADIOGROUP:
-			return this.generateRadiogroupHTML();
-		case Question.Types.HTML:
-			const html = "<div id='" + this.containerId + "'>" + this.html + "</div>";
-			return html;
-		case Question.Types.DATE:
-			return this.generateDateHTML();
-		default:
-			throw Error("Unsupported question type");
-	}
-}
-Question.prototype.generateTextHTML = function() {
-	const titleHTML = "<div id='" + this.titleId + "'>" + this.title + "</div>";
-	const errorsHTML = this.renderErrors(false);
-	const inputHTML = "<input id='" + this.inputId + "' type='text'" + (this.disabledIf() ? " disabled" : "") + "/>";
-	const HTML = "<div id='" + this.containerId +  "'>" + titleHTML + errorsHTML + inputHTML + "</div>";
-
-	return HTML;
-}
-Question.prototype.generateNumberHTML = function() {
-	const titleHTML = "<div id='" + this.titleId + "'>" + this.title + "</div>";
-	const errorsHTML = this.renderErrors(false);
-	const inputHTML = "<input id='" + this.inputId + "' type='number'" + (this.disabledIf() ? " disabled" : "") + "/>";
-	const HTML = "<div id='" + this.containerId +  "'>" + titleHTML + errorsHTML + inputHTML + "</div>";
-
-	return HTML;
-}
-Question.prototype.generateCheckboxHTML = function() {
-	const titleHTML = "<div id='" + this.titleId + "'>" + this.title + "</div>";
-	const errorsHTML = this.renderErrors(false);
-	const inputHTML = "<input id='" + this.inputId + "' type='checkbox'" + (this.disabledIf() ? " disabled" : "") + "/>";
-	const HTML = "<div id='" + this.containerId +  "'><label>" + titleHTML + errorsHTML + inputHTML + "</label></div>";
-
-	return HTML;
-}
-Question.prototype.generateDropdownHTML = function() {
-	const titleHTML = "<div id='" + this.titleId + "'>" + this.title + "</div>";
-	const errorsHTML = this.renderErrors(false);
-	var inputHTML = "<select id='" + this.inputId + "'" + (this.disabledIf() ? " disabled" : "") + ">";
-	this.dropdownOptions.forEach(function(o) {
-		inputHTML += "<option value='" + o.value + "'>" + o.text + "</option>"
-	});
-	inputHTML += "</select>"
-	const HTML = "<div id='" + this.containerId +  "'>" + titleHTML + errorsHTML + inputHTML + "</div>";
-
-	return HTML;
-}
-Question.prototype.generateCheckboxgroupHTML = function() {
-	const titleHTML = "<div id='" + this.titleId + "'>" + this.title + "</div>";
-	const errorsHTML = this.renderErrors(false);
-	var inputHTML = "<div id='" + this.inputId + "'>"
-	this.checkboxOptions.forEach((o) => {
-		inputHTML += "<label>";
-		inputHTML += "<input id='" + this.checkboxIdPrefix + o.value + "' type='checkbox' value='" + o.value + "'" + (this.disabledIf() ? " disabled" : "") + "/>";
-		inputHTML += "<span id='" + this.checkboxLabelIdPrefix + o.value + "'>" + o.text + "</span>";
-		inputHTML += "</label>";
-	});
-	inputHTML += "</div>"
-	const HTML = "<div id='" + this.containerId +  "'>" + titleHTML + errorsHTML + inputHTML + "</div>";
-
-	return HTML;
-}
-Question.prototype.generateRadiogroupHTML = function() {
-	const titleHTML = "<div id='" + this.titleId + "'>" + this.title + "</div>";
-	const errorsHTML = this.renderErrors(false);
-	var inputHTML = "<div id='" + this.inputId + "'>";
-	this.radioOptions.forEach((o) => {
-		if (this.radioVertical) {
-			inputHTML += "<label class='radio-vertical'>";
-		} else {
-			inputHTML += "<label class='radio-horizontal'>";
+		// Behaves similarly to linkToDependantQuestions, except for SurveyError that are influenced by this Question
+		this.linkToSurveyErrors = function() {
+			this.errors = [];
+			this.page.errors().forEach((e) => {
+				if (e.questions.indexOf(this) !== -1) {
+					this.errors.push(e);
+				}
+			});
+			switch (this.type) {
+				case Question.Types.RADIOGROUP:
+					this.options.forEach((o) => {
+						$("[name='" + this.name + "'][value='" + o.value + "']").change(() => {
+							Page.onChange = true;
+							this.errors.forEach((e) => {
+								e.updateVisibility();
+							})
+						});
+					})
+					break;
+				case Question.Types.DROPDOWN:
+				case Question.Types.CHECKBOX:
+					if (this.errors.length !== 0) {
+						$(this.selector).change(() => {
+							Page.onChange = true;
+							this.errors.forEach((e) => {
+								e.updateVisibility();
+							})
+						});
+					}
+					break;
+				case Question.Types.DATE:
+				case Question.Types.NUMBER:
+					if (this.errors.length !== 0) {
+						$(this.selector).change(() => {
+							registerDebounce(() => {
+								Page.onChange = true;
+								this.errors.forEach((e) => {
+									e.updateVisibility();
+								})
+							}, 250)
+						})
+					}
+				case Question.Types.TEXT:
+					if (this.errors.length !== 0) {
+						$(this.selector).keydown(() => {
+							registerDebounce(() => {
+								Page.onChange = true;
+								this.errors.forEach((e) => {
+									e.updateVisibility();
+								})
+							}, 250)
+						});
+					}
+					break;
+			}
 		}
-		inputHTML += "<input id='" + this.radioIdPrefix + o.value + "' name='" + this.name + "' type='radio' value='" + o.value + "'" + (this.disabledIf() ? " disabled" : "") + "/>";
-		inputHTML += "<span id='" + this.radioLabelIdPrefix + o.value + "'> " + o.text + "</span>";
-		inputHTML += "</label>";
-	});
-	inputHTML += "</div>"
-	const HTML = "<div id='" + this.containerId +  "'>" + titleHTML + errorsHTML + inputHTML + "</div>";
-
-	return HTML;
-}
-Question.prototype.generateDateHTML = function() {
-	const titleHTML = "<div id='" + this.titleId + "'>" + this.title + "</div>";
-	const errorsHTML = this.renderErrors(false);
-	const inputHTML = "<input id='" + this.inputId + "' type='date'" + (this.disabledIf() ? " disabled" : "") + "/>";
-	const HTML = "<div id='" + this.containerId +  "'>" + titleHTML + errorsHTML + inputHTML + "</div>";
-
-	return HTML;
-}
-Question.getDefaultValueForType = function (type) {
-	switch (type) {
-		case Question.Types.TEXT:
-			return "";
-		case Question.Types.NUMBER:
-			return "";
-		case Question.Types.CHECKBOX:
-			return false;
-		case Question.Types.DROPDOWN:
-			return "";
-		case Question.Types.CHECKBOXGROUP:
-			return {};
-		case Question.Types.RADIOGROUP:
-			return "";
-		case Question.Types.RADIO:
-			return false;
-		case Question.Types.HTML:
-			return "";
-		case Question.Types.DATE:
-			return "";
-		default:
-			throw Error("Unsupported question type");
-	}
-};
-Question.prototype.setDefaultValue = function () {
-	switch (this.type) {
-		case Question.Types.CHECKBOXGROUP:
-			//variables[this.name] = {};
-			this.checkboxOptions.forEach((o) => {
-				var defVal = Question.getDefaultValueForType(Question.Types.CHECKBOX);
-				if (variables.hasOwnProperty(this.name)) {
-					defVal = variables[this.name][o.value];
-				}
-				$(this.checkboxSelectorPrefix + o.value).prop('checked', defVal);
-			});
-			break;
-		case Question.Types.RADIOGROUP:
-			this.radioOptions.forEach((o) => {
-				var defVal = Question.getDefaultValueForType(Question.Types.RADIOGROUP);
-				if (variables.hasOwnProperty(this.name)) {
-					defVal = o.value === variables[this.name];
-				}
-				$(this.radioSelectorPrefix + o.value).prop('checked', defVal);
-			});
-			break;
-		case Question.Types.CHECKBOX:
-			var defVal = Question.getDefaultValueForType(this.type);
-			if (variables.hasOwnProperty(this.name)) {
-				defVal = variables[this.name];
-			}
-			$(this.inputSelector).prop('checked', defVal);
-			break;
-		case Question.Types.DATE:
-			var defVal = Question.getDefaultValueForType(this.type);
-			if (variables.hasOwnProperty(this.name)) {
-				defVal = moment(variables[this.name]).format("YYYY-MM-DD");
-			}
-			$(this.inputSelector).val(defVal);
-			break;
-		default:
-			var defVal = Question.getDefaultValueForType(this.type);
-			if (variables.hasOwnProperty(this.name)) {
-				defVal = variables[this.name];
-			}
-			$(this.inputSelector).val(defVal);
 	}
 }
+Question.Types = {
+	TEXT: "TEXT",
+	NUMBER: "NUMBER",
+	DATE: "DATE",
+	RADIOGROUP: "RADIOGROUP",
+	CHECKBOX: "CHECKBOX",
+	DROPDOWN: "DROPDOWN",
+	HTML: "HTML",
+	DYNAMIC_HTML: "DYNAMIC_HTML",
+}
+
 Question.prototype.render = function() {
-	if (!this.visibleIf()) return "";
-	return this.generateHTML();
-}
-Question.prototype.renderErrors = function(existInDOM) {
-	var errorsHTML = "";
-	this.errors.forEach((e, i) => {
-		errorsHTML += "<div id='" + this.getErrorId(e, i) + "' class='survey-error'>" + e + "</div>";
-	});
-	if (existInDOM) {
-		$(this.errorsSelector).empty();
-		if (errorsHTML !== "") {
-			$(this.errorsSelector).html(errorsHTML);
-		}
-	} else {
-		errorsHTML = "<div id='" + this.errorsId + "'>" + errorsHTML;
-		errorsHTML += "</div>";
-		return errorsHTML;
-	}
-}
-Question.prototype.clearErrors = function() {
-	$(this.errorsSelector).empty();
-	this.errors = [];
-}
-Question.prototype.validateAndShowErrors = function(showRequiredErrors) {
-	this.errors = [];
-	var noErrors = true;
-	if (this.visibleIf()) {
-		if (!this.validateRequired(showRequiredErrors)) {
-			noErrors = false;
-		}
-		if (!this.validateCustom()) {
-			noErrors = false;
-		}
-	}
-	this.renderErrors(true);	
-	return noErrors;
-}
-Question.prototype.validateCustom = function() {
-	if (this.disabledIf() || this.validatorNames.length === 0) return true;
-	var passedTest = true;
-	this.validatorNames.forEach((v) => {
-		switch (v) {
-			case Question.Validators.NEGATIVENUMBER:
-				if (this.type !== Question.Types.NUMBER) {
-					throw Error("invalid type for number validator");
-				}
-				if (variables[this.name] < 0) {
-					passedTest = false;
-					this.errors.push("Input must not be negative");
-				}
-				break;
-			case Question.Validators.FUTUREDATE:
-				if (this.type !== Question.Types.DATE) {
-					throw Error("invalid type for date validator");
-				}
-				if (moment(variables[this.name]).isAfter(moment())) {
-					passedTest = false;
-					this.errors.push("Date must not be in the future");
-				}
-				break;
-		}
-	});
-	return passedTest;
-}
-Question.prototype.validateRequired = function(showRequiredErrors) {
-	if (!this.isRequired || this.disabledIf() || this.type === Question.Types.HTML) return true;
-	var passedTest = false;
-	switch (this.type) {
-		case Question.Types.CHECKBOXGROUP:
-			this.checkboxOptions.find((o) => {
-				if ($(this.checkboxSelectorPrefix + o.value).is(":checked")) {
-					passedTest = true;
-				}
-			})
-			break;
-		case Question.Types.RADIOGROUP:
-			passedTest = !!$("[name='" + this.name + "']:checked").val();
-			break;
-		default:
-			passedTest = !!$(this.inputSelector).val();
-	}
-	if (!passedTest && showRequiredErrors) {
-		this.errors.push("Missing required field");
-	}
-	return passedTest;
-}
-Question.prototype.setVariable = function(checkboxName = undefined) {
-	switch (this.type) {
-		case Question.Types.TEXT:
-			variables[this.name] = $(this.inputSelector).val();
-			break;
-		case Question.Types.NUMBER:
-			variables[this.name] = parseInt($(this.inputSelector).val());
-			break;
-		case Question.Types.CHECKBOX:
-			variables[this.name] = $(this.inputSelector).is(":checked");	
-			break;
-		case Question.Types.DROPDOWN:
-			variables[this.name] = $(this.inputSelector + " option:selected").val();	
-			break;
-		case Question.Types.CHECKBOXGROUP:
-			variables[this.name][checkboxName] = $(this.checkboxSelectorPrefix + checkboxName).is(":checked");
-			break;
-		case Question.Types.RADIOGROUP:
-			variables[this.name] = $("[name='" + this.name + "']:checked").val();
-			break;
-		case Question.Types.DATE:
-			variables[this.name] = moment($(this.inputSelector).val());
-			break;
-		default:
-			throw Error("Unsupported question type");
-	}
-}
-Question.prototype.setOnChange = function() {
-	switch (this.type) {
-		case Question.Types.CHECKBOXGROUP:
-			this.checkboxOptions.forEach((o) => {
-				$(this.checkboxSelectorPrefix + o.value).change(() => {
-					this.setVariable(o.value);
-					this.validateAndShowErrors(false);
-				});
-			});
-			break;
-		case Question.Types.RADIOGROUP:
-			this.radioOptions.forEach((o) => {
-				$(this.radioSelectorPrefix + o.value).click(() => {
-					this.setVariable();
-					this.validateAndShowErrors(false);
-				})
-			});
-			break;
-		case Question.Types.DROPDOWN:
-		case Question.Types.CHECKBOX:
-			$(this.inputSelector).change(() => {
-				this.setVariable();
-				this.validateAndShowErrors(false);
-			})
-		default:
-			$(this.inputSelector).keypress(debounce(
-				() => {
-					this.setVariable();
-					this.validateAndShowErrors(false);
-				}, 250
-			));
-	}
-}
-Question.prototype.disable = function() {
-	switch (this.type) {
-		case Question.Types.DATE:
-		case Question.Types.TEXT:
-		case Question.Types.NUMBER:
-		case Question.Types.CHECKBOX:
-		case Question.Types.DROPDOWN:
-			$(this.inputSelector).prop('disabled', true);
-			break;
-		case Question.Types.CHECKBOXGROUP:
-			this.checkboxOptions.forEach((o) => {
-				$(this.checkboxSelectorPrefix + o.value).prop('disabled', true);
-			});
-			break;
-		case Question.Types.RADIOGROUP:
-			this.radioOptions.forEach((o) => {
-				$(this.radioSelectorPrefix + o.value).prop('disabled', true);
-			});
-			break;
-		default:
-			throw Error("Unsupported question type");
-	}
-}
-Question.prototype.enable = function() {
-	switch (this.type) {
-		case Question.Types.DATE:
-		case Question.Types.TEXT:
-		case Question.Types.NUMBER:
-		case Question.Types.CHECKBOX:
-		case Question.Types.DROPDOWN:
-			$(this.inputSelector).prop('disabled', false);
-			break;
-		case Question.Types.CHECKBOXGROUP:	
-			this.checkboxOptions.forEach((o) => {
-				$(this.checkboxSelectorPrefix + o.value).prop('disabled', false);
-			});
-			break;
-		case Question.Types.RADIOGROUP:
-			this.radioOptions.forEach((o) => {
-				$(this.radioSelectorPrefix + o.value).prop('disabled', false);
-			});
-			break;
-		default:
-			throw Error("Unsupported question type");
-	}
-	this.validateAndShowErrors(false);
-}
+	if (this.isAlreadyVisible()) return "";
 
+	var HTML = this.generateSkeletonHTML();
+	return HTML
+}
+Question.prototype.setProperties = function() {
+	this.setPlaceholder();
+	this.setDefaultValue();
+	this.initializeVariable();
+}
 
 class Page {
-	constructor ({pageClass = "", visibleIf = true, questions, nextVisibleIf = true, nextButtonText = undefined, prevButtonText = undefined}) {
-		this.pageClass = pageClass;
-		this.visibleIf = isFunction(visibleIf) ? visibleIf : function() {return visibleIf};
-		this.questions = questions;
-		this.containerId = "page";
-		this.containerSelector = "#" + this.containerId;
-		this.nextVisibleIf = isFunction(nextVisibleIf) ? nextVisibleIf : function() {return nextVisibleIf};
+	/*
+		elements -- an array of [Div, Question, SurveyError, Title]
+	*/
+	constructor({elements=[], visibleIf=true, nextBtnText="Next &#9654;&#xFE0E;", prevBtnText="&#9664;&#xFE0E; Previous", isNextButtonVisible=true}) {
+		this.nextBtnText = nextBtnText;
+		this.prevBtnText = prevBtnText;
+		this.isNextButtonVisible = isNextButtonVisible;
 
-		this.customNextButtonText = nextButtonText;
-		this.customPrevButtonText = prevButtonText;
-	}
-}
-Page.globalClassRules = [];
-Page.lastRule = false;
-Page.addGlobalClassRule = function(classRule) {
-	classRule[0] = isFunction(classRule[0]) ? classRule[0] : function() {return classRule[0]};
-	Page.globalClassRules.push(classRule);
-}
-Page.getVisibleClassesAsArray = function() {
-	return Page.globalClassRules.filter((r) => {
-		return r[0]() === true;
-	}).map((o) => {
-		return o[1];
-	})
-}
-Page.prototype.clearErrors = function() {
-	this.questions.forEach((q) => {
-		q.clearErrors();
-	})
-}
-Page.prototype.render = function() {
-	var html = "";
-	const classes = Page.getVisibleClassesAsArray();
-	if (classes.length !== 0) {
-		html += "<div id='page' class='" + classes.join(" ") + "'>";
-	} else {
-		html += "<div id='page'>";
-	}
+		this.elements = elements;
 
-		this.questions.forEach(function(q) {
-			html += q.render();
-		});
-	html += "</div>";
-	return html;
-}
-Page.prototype.linkQuestionsToVariables = function() {
-	this.questions.forEach(function(q) {
-		q.setOnChange();
-	});
-}
-Page.prototype.linkQuestionsToTriggers = function(survey) {
-	this.questions.forEach(function(q) {
-		q.dependants = [];
-		this.questions.forEach(function(q2) {
-			if (q2.visibleIf.toString().includes('variables["' + q.name + '"]')) {
-				q.dependants.push(q2.name);	
-			} else if (q2.disabledIf.toString().includes('variables["' + q.name + '"]')) {
-				q.dependants.push(q2.name);	
+		/*
+			Recursively flatten all elements within this page into one array
+			classNames -- the names of specific elements (i.e., "Question", "Div", ...) to find
+		*/
+		this.findElements = (classNames=[]) => {
+			const recurse = function(collection) {
+				var results = [];
+				for (var i in collection) {
+					if (classNames.length === 0 || classNames.indexOf(collection[i].constructor.name) !== -1) {
+						results.push(collection[i]);
+					}
+					// Divs are themselves collections of elements, so perform the recursion on them
+					if (collection[i].constructor.name === "Div") {
+						results = results.concat(recurse(collection[i].children));
+					}
+				}
+				return results;
 			}
-		}, this);
-		if (q.dependants.length !== 0) {
-			$(q.inputSelector).change(() => {
-				this.updateQuestionVisibility(q);
-				this.updateQuestionDisability(q);
-			});
+			return recurse(this.elements);
 		}
-	}, this);
+		// Give each element an instance of this page so that various methods like getParentDiv are accessible
+		this.findElements().forEach((e) => {
+			e.page = this;
+		})
+
+		const qs = this.questions();
+
+		// give each SurveyError a list of questions that it depends on (listed in logicVisibleIf)
+		const varRegex = /variables\["(.+?)"\]/g;
+		this.findElements(["SurveyError"]).forEach((e) => {
+			const fString = e.logicVisibleIf.toString();
+			var match = varRegex.exec(fString);
+			while (match != null) {
+				e.questions.push(this.findQuestionByName(match[1], qs));
+				match = varRegex.exec(fString);
+			}
+		})
+
+		// give each reusable SurveyError the question it depends on -- these have not been set in the SurveyError loop above because the regex expression does not match
+		// the programatically generated logicVisibleIf within each reusable SurveyError -- see the reusable SurveyError (i.e., RequiredTextError) constructors
+		this.findElements(["RequiredTextError", "RequiredNumberError", "RequiredDateError", "RequiredDropdownError", "RequiredRadiogroupError", "DateInFutureError", "NegativeNumberError"]).forEach((e) => {
+			e.questions.push(this.findQuestionByName(e.name.substring(0, e.name.length - "_req".length), qs));
+		})
+
+		// give each title a reference to the question that it depends on
+		this.titles().forEach((t) => {
+			t.setQuestion(this.findQuestionByName(t.questionName, qs));
+		})
+
+		this.visibleIf = isFunction(visibleIf) ? visibleIf : function() {return visibleIf};
+	}
 }
-Page.prototype.hideQuestion = function(q) {
-	$(q.containerSelector).remove();
-	q.clearErrors();
+Page.onChange = false;
+Page.prototype.render = function(containerJQuery) {
+	var HTML = "<div id='page'></div>";
+	containerJQuery.append(HTML);
+
+	// pass 1: put elements into the DOM
+	// If error conditions match but questions that these errors are meant for are initially disabled/hidden, then errors are still rendered
+	this.elements.forEach((elm) => {
+		if (elm.visibleIf()) {
+			$("#page").append(elm.render());
+		}
+	})
+
+	// pass 2: set question properties
+	this.questions().forEach((q) => {
+		q.setProperties();
+		q.linkToVariable();
+		q.linkToDependantQuestions();
+		q.linkToSurveyErrors();
+	})
+
+	// pass3: set question visibility/disability
+	this.questions().forEach((q) => {
+		q.updateDisability();
+		q.updateVisibility();
+	})
+
+	// Hide errors that should not have been rendered in pass 1
+	this.errors().forEach((e) => {
+		Page.onChange = true;
+		e.updateVisibility();
+	})
 }
-Page.prototype.showQuestion = function(q) {
-	var prevElm = undefined;
-	for (var i = this.findQuestionIndex(q) - 1; i >= 0; i --) {
-		if (this.questions[i].visibleIf()) {
-			prevElm = $(this.questions[i].containerSelector);
-			prevElm.after(q.render());
+/*
+	element -- one of [SurveyError, Title, Question] to be removed from the page
+
+	If the element is the last visible child of a parent Div, remove that Div
+*/
+Page.prototype.hideElement = function(element) {
+	const hideDiv = function(div) {
+		if (div.removeIfEmpty === true) {
+			$(div.selector).remove();
+		} else {
+			$(div.selector).hide();
+		}
+	}
+
+	if (!element.isAlreadyVisible()) return;
+	$(element.selector).remove();
+
+	var parentDiv = element;
+	do {
+		parentDiv = this.getParentDiv(parentDiv);
+		var parentDivNeedsToBeRemoved = parentDiv !== this && parentDiv.visibleIf() === false;
+		if (parentDivNeedsToBeRemoved) {
+			hideDiv(parentDiv);
+		}
+	} while (parentDivNeedsToBeRemoved === true);
+}
+
+/*
+	element -- one of [SurveyError, Title, Question] to be shown on the page
+		-- any parent divs that were hidden are also shown
+*/
+Page.prototype.showElement = function(element) {
+	if (element.isAlreadyVisible()) return;
+
+	var hiddenButNotRemovedAncestors = []; // contains elements that have hidden visibility and are not children of `highestRemovedAncestor`
+	var highestRemovedAncestor = undefined;
+
+	var lowestVisibleAncestorInDOM = element;
+	do {
+		lowestVisibleAncestorInDOM = this.getParentDiv(lowestVisibleAncestorInDOM);
+		isAncestorHidden = lowestVisibleAncestorInDOM !== this && lowestVisibleAncestorInDOM.isAlreadyVisible() === false;
+		if (isAncestorHidden) {
+			if (lowestVisibleAncestorInDOM.removeIfEmpty === true) {
+				highestRemovedAncestor = lowestVisibleAncestorInDOM;
+				hiddenButNotRemovedAncestors = []; // all divs in this array were children of `highestRemovedAncestor` and will be re-rendered when it is re-added
+			} else {
+				hiddenButNotRemovedAncestors.push(lowestVisibleAncestorInDOM);
+			}
+		}
+	} while (isAncestorHidden);
+
+	if (hiddenButNotRemovedAncestors.length !== 0) {
+		lowestVisibleAncestorInDOM = hiddenButNotRemovedAncestors[0];
+		for (i = hiddenButNotRemovedAncestors.length - 1; i >= 0; i --) {
+			$(hiddenButNotRemovedAncestors[i].selector).show();
+		}
+	}
+
+	var childrenOfLowestVisibleAncestorInDOM = lowestVisibleAncestorInDOM === this ? this.elements : lowestVisibleAncestorInDOM.children;
+	var selectorOflowestVisibleAncestorInDOM = lowestVisibleAncestorInDOM === this ? $("#page") : $(lowestVisibleAncestorInDOM.selector);
+	var objectToRender = highestRemovedAncestor === undefined ? element : highestRemovedAncestor;
+
+	var pre = undefined;
+	for (i in childrenOfLowestVisibleAncestorInDOM) {
+		if (childrenOfLowestVisibleAncestorInDOM[i] === objectToRender || childrenOfLowestVisibleAncestorInDOM[i].removeIfEmpty === false) {
 			break;
 		}
-	}
-	if (!prevElm) {
-		prevElm = $(this.containerSelector);
-		prevElm.append(q.render());
+		else if (childrenOfLowestVisibleAncestorInDOM[i].isAlreadyVisible()) {
+			pre = childrenOfLowestVisibleAncestorInDOM[i];
+		}
 	}
 
-	q.validateAndShowErrors(false);
-	q.setDefaultValue();
-	q.setOnChange();
-	$(q.inputSelector).change(() => {
-		this.updateQuestionVisibility(q);
-		this.updateQuestionDisability(q);
-	});
+	if (pre === undefined) {
+		selectorOflowestVisibleAncestorInDOM.prepend(objectToRender.render());
+	} else {
+		$(pre.selector).after(objectToRender.render());
+	}
 }
-Page.prototype.updateQuestionVisibility = function(trigger) {
-	trigger.dependants.forEach(function(d) {
-		if (!this.findQuestionByName(d).visibleIf()) {
-			this.hideQuestion(this.findQuestionByName(d));
-		} else if ($(this.findQuestionByName(d).inputSelector).length === 0) {
-			this.showQuestion(this.findQuestionByName(d));
+Page.prototype.hideQuestion = function(question) {
+	this.hideElement(question);
+	const title = this.findTitleByQuestionName(question.name);
+	if (title !== undefined) {
+		this.hideElement(title);
+	}
+}
+Page.prototype.showQuestion = function(question) {
+	const title = this.findTitleByQuestionName(question.name);
+	if (title !== undefined) {
+		this.showElement(title);
+	}
+	this.showElement(question);
+	// perform sequence of question initialization, as in Page.prototype.render()
+	question.setProperties();
+	question.linkToVariable();
+	question.linkToDependantQuestions();
+	question.linkToSurveyErrors();
+	question.updateDisability();
+	// don't need to update visibility, because this method call is a direct product of that method having been called
+	// at this point, error visibility has already been updated by the question
+}
+
+/*
+	elm -- an element (Div, Question, SurveyError, Title) whose parent is the one to find
+	Return: a Div or Page element which is the closest ancestor of `elm`, or undefined if `elm` cannot be found
+		Perform a depth-first search on the page structure
+*/
+Page.prototype.getParentDiv = function(elm) {
+	const recurse = (source) => {
+		var collection = [];
+		if (source === this) {
+			collection = this.elements;
+		} else if (source.constructor.name === "Div") {
+			collection = source.children;
 		}
-	}, this);
-}
-Page.prototype.updateQuestionDisability = function(trigger) {
-	trigger.dependants.forEach(function(d) {
-		if ($(this.findQuestionByName(d).inputSelector).length === 0) return;
-		if (this.findQuestionByName(d).disabledIf()) {
-			this.findQuestionByName(d).validateAndShowErrors(false);
-			this.findQuestionByName(d).disable();
-		} else {
-			this.findQuestionByName(d).enable();
+		var ret = undefined;
+		if (collection.length !== 0) {
+			for (i in collection) {
+				if (collection[i] === elm) {
+					ret = source;
+				} else {
+					ret = recurse(collection[i])
+				}
+				if (ret !== undefined) return ret;
+			}
 		}
-	}, this);
+
+		return ret;
+	}
+	const ret = recurse(this);
+	if (ret === undefined) {
+		throw Error("Unable to find element " + elm.name);
+	}
+	return ret;
 }
-Page.prototype.findQuestionByName = function(name) {
-	return this.questions.find(function(q) {
-		return q.name === name;
-	});
+Page.prototype.questions = function() {
+	return this.findElements(["Question"]);
 }
-Page.prototype.findQuestionIndexByName = function(name) {
-	return this.questions.findIndex(function(q) {
-		return q.name === name;
-	});
+Page.prototype.errors = function() {
+	return this.findElements(["SurveyError", "RequiredTextError", "RequiredNumberError", "RequiredDateError", "RequiredDropdownError", "RequiredRadiogroupError", "DateInFutureError", "NegativeNumberError"]);
 }
-Page.prototype.findQuestionIndex = function(q) {
-	return this.questions.indexOf(q);
+Page.prototype.titles = function() {
+	return this.findElements(["Title"]);
 }
-Page.prototype.runValidators = function(showRequiredErrors) {
+
+// return true if no errors are present on the page; otherwise, return false
+Page.prototype.runValidators = function() {
 	var noErrors = true;
-	this.questions.forEach(function(q) {
-		if (!q.validateAndShowErrors(showRequiredErrors)) {
+	this.errors().forEach((e) => {
+		Page.onChange = false;
+		e.updateVisibility();
+		if (e.isAlreadyVisible()) {
 			noErrors = false;
 		}
-	});
+	})
 	return noErrors;
 }
 
+Page.prototype.findQuestionIndex = function(question) {
+	return this.questions().indexOf(question);
+}
+Page.prototype.findQuestionByName = function(qName, preloaded=undefined) {
+	if (preloaded !== undefined) {
+		return preloaded.find((q) => {return q.name === qName});
+	} else {
+		return this.questions().find((q) => {return q.name === qName});
+	}
+}
+Page.prototype.findTitleByQuestionName = function(qName) {
+	return this.titles().find((t) => {return t.questionName === qName});
+}
 
-// survey
 class Survey {
-	constructor({containerId, pages}) {
-		this.containerId = containerId;
-		this.containerSelector = "#" + this.containerId;
+	/*
+		containerJQuery -- the div on the page into which this survey is being inserted
+	*/
+	constructor({pages=[], containerJQuery=undefined}) {
 		this.pages = pages;
 		this.currentPageIdx = 0;
-		this.defaultButtonClasses = [];
-		this.defaultNavClasses = [];
+		if (containerJQuery === undefined) {
+			throw Error("Missing container for survey")
+		}
+		this.containerJQuery = containerJQuery;
 
-		this.onComplete = function() {};
-		this.defaultNextButtonText = "Next";
-		this.defaultPrevButtonText = "Previous";
-	}
-}
-Survey.prototype.setDefaultNextButtonText = function(text) {
-	this.defaultNextButtonText = text;
-}
-Survey.prototype.getNextButtonText = function() {
-	if (this.getCurrentPage().customNextButtonText !== undefined) {
-		return this.getCurrentPage().customNextButtonText;
-	}
-	return this.defaultNextButtonText;
-}
-Survey.prototype.setDefaultPrevButtonText = function(text) {
-	this.defaultPrevButtonText = text;
-}
-Survey.prototype.getPrevButtonText = function() {
-	if (this.getCurrentPage().customPrevButtonText !== undefined) {
-		return this.getCurrentPage().customPrevButtonText;
-	}
-	return this.defaultPrevButtonText;
-}
-Survey.prototype.getCurrentPage = function() {
-	return this.pages[this.currentPageIdx];
-}
-Survey.prototype.addDefaultButtonClass = function(buttonClass) {
-	this.defaultButtonClasses.push(buttonClass);
-}
-Survey.prototype.addDefaultNavClass = function(navClass) {
-	this.defaultNavClasses.push(navClass);
-}
-Survey.prototype.goToNextPage = function() {
-	const oldIdx = this.currentPageIdx;
-	const newPage = this.pages.find(function(p, i) {
-		if (i <= this.currentPageIdx) return false;
-		this.currentPageIdx ++;
-		return p.visibleIf();
-	}, this);
-	if (!newPage) {
-		this.currentPageIdx = oldIdx;
-		this.onComplete();
-	} else {
-		this.render();
-	}
-}
-Survey.prototype.attemptToGoToNextPage = function() {
-	const noErrors = this.getCurrentPage().runValidators(true);
-	if (noErrors) {
-		this.goToNextPage();
-	}
-}
-Survey.prototype.goToPrevPage = function() {
-	for (var i = this.pages.length - 1; i >= 0; i --) {
-		if (i >= this.currentPageIdx) continue;
-		this.currentPageIdx --;
-		if (this.pages[i].visibleIf()) break;
-	}
-	if (this.currentPageIdx === -1) {
-		this.onComplete();
-	} else {
-		this.render();
+		this.onComplete = function(){}
+		this.onNextPage = function(){}
+		this.onPrevPage = function(){}
 	}
 }
 Survey.prototype.render = function() {
-	window.scrollTo(0, 0);
-	$(this.containerSelector).empty();
-	var html = "<div id='survey'>"
-		html += this.pages[this.currentPageIdx].render();
-	html += "</div>";
+	this.containerJQuery.empty();
 
-	html += "<div id='survey-nav' class='" + this.defaultNavClasses.join(" ") + "'>";
+	while (this.currentPageIdx < this.pages.length && this.pages[this.currentPageIdx].visibleIf() === false) {
+		this.currentPageIdx ++;
+	}
+	const page = this.currentPageIdx === this.pages.length ? undefined : this.pages[this.currentPageIdx]
+	if (page !== undefined) {
+		page.render(this.containerJQuery);
+	}
+
+	var NAV = "<div id='nav' class='row small-11 medium-8 large-5 columns text-center'>";
+
 	if (this.currentPageIdx !== 0) {
-		html += "<input id='prev-btn' type='button' value='" + this.getPrevButtonText() + "' class='" + this.defaultButtonClasses.join(" ") + "'></input>";
+		NAV += "<input id='prev-btn' type='button' class='button' value='" + this.currentPage().prevBtnText + "' aria-label='" + formatButtonTextForAriaLabel(this.currentPage().prevBtnText) + "'/>"
 	}
-
-	if (this.pages[this.currentPageIdx].nextVisibleIf()) {
-		html += "<input id='next-btn' type='button' value='" + this.getNextButtonText() + "' class='" + this.defaultButtonClasses.join(" ") + "'></input>";
+	if (this.currentPage().isNextButtonVisible === true) {
+		NAV += "<input id='next-btn' type='button' class='button' value='" + this.currentPage().nextBtnText + "' aria-label='" + formatButtonTextForAriaLabel(this.currentPage().nextBtnText)  + "'/>"
 	}
-	html += "</div>"; // close nav
-
-	$(this.containerSelector).html(html);
-
-	this.pages[this.currentPageIdx].linkQuestionsToVariables();
-	this.pages[this.currentPageIdx].linkQuestionsToTriggers(this);
-	this.pages[this.currentPageIdx].questions.forEach(function(q) {
-		q.setDefaultValue();
-	});
+	NAV += "</div>"
+	$("#page").after(NAV)
 
 	$("#prev-btn").click(() => {
-		this.getCurrentPage().clearErrors();
 		this.goToPrevPage();
 	})
-	if (this.pages[this.currentPageIdx].nextVisibleIf()) {
-		$("#next-btn").click((e) => {
-			this.attemptToGoToNextPage();
-		})
-	}
-	this.getCurrentPage().runValidators(false);
+
+	$("#next-btn").click(() => {
+		this.attemptToGoToNextPage();
+	})
 }
-Survey.prototype.hide = function() {
-	$(this.containerSelector).empty();
-}
-Survey.prototype.isQuestionPartOfWorkflow = function(questionName) {
-	var foundAndVisible = false;
-	this.pages.forEach((p) => {
-		if (foundAndVisible) return;
-		const question = p.questions.find((q) => {
-			return q.name === questionName;
-		})
-		if (question) {
-			foundAndVisible = p.visibleIf() && question.visibleIf();
+Survey.prototype.attemptToGoToNextPage = function() {
+	// wait for all elements (errors, questions, ...) to have finished rendering
+	awaitDebounce(() => {
+		const noErrors = this.currentPage().runValidators(true);
+		if (noErrors) {
+			this.goToNextPage();
 		}
 	})
-	return foundAndVisible;
+}
+Survey.prototype.goToNextPage = function() {
+
+	const oldPageIdx = this.currentPageIdx;
+	do {
+		this.currentPageIdx ++;
+	} while (this.currentPageIdx !== this.pages.length && this.currentPage().visibleIf() === false);
+
+	if (this.currentPageIdx === this.pages.length) {
+		this.currentPageIdx = oldPageIdx;
+		this.onComplete();
+	} else {
+		this.render();
+		this.onNextPage();
+	}
+}
+Survey.prototype.goToPrevPage = function() {
+	if (this.currentPageIdx === 0) return;
+	do {
+		this.currentPageIdx --;
+	} while (this.currentPageIdx > 0 && this.currentPage().visibleIf() === false);
+
+	this.render();
+	this.onPrevPage();
+}
+
+Survey.prototype.currentPage = function() {
+	return this.pages[this.currentPageIdx];
+}
+
+Survey.prototype.findPageByQuestionName = function(qName) {
+	return this.pages.find((p) => {
+		return p.findQuestionByName(qName) !== undefined;
+	})
+}
+
+/*
+	Return whether or not the user can get to the question named `qName` based on the already input answers
+*/
+Survey.prototype.isQuestionPartOfWorkflow = function(qName) {
+	const page = this.findPageByQuestionName(qName);
+	return page.visibleIf() === true && page.findQuestionByName(qName).visibleIf() === true;
 }
 
 function isFunction(functionToCheck) {
 	var getType = {};
 	return functionToCheck && getType.toString.call(functionToCheck) === '[object Function]';
 }
-
 // Source: https://davidwalsh.name/javascript-debounce-function
 // Returns a function, that, as long as it continues to be invoked, will not
 // be triggered. The function will be called after it stops being called for
@@ -741,3 +1173,41 @@ function debounce(func, wait, immediate) {
 		if (callNow) func.apply(context, args);
 	};
 };
+
+const debounceQueue = [];
+var debounceToken = 0;
+function registerDebounce(action, duration) {
+	const tok = ++ debounceToken;
+	debounceQueue.push(tok);
+	debounce(() => {
+		unregisterDebounce(tok);
+		action();
+	}, duration)()
+}
+function unregisterDebounce(tok) {
+	const idx = debounceQueue.indexOf(tok);
+	if (idx !== -1) {
+		debounceQueue.splice(idx, 1);
+	}
+}
+function isDebouncing() {
+	return debounceQueue.length !== 0;
+}
+function awaitDebounce(func) {
+	if (isDebouncing() === true) {
+		const waitForDb = setInterval(() => {
+			if (isDebouncing() === false) {
+				clearInterval(waitForDb);
+				func();
+			}
+		}, 1);
+	} else {
+		func();
+	}
+}
+
+function formatButtonTextForAriaLabel(text) {
+	if (text.indexOf("Previous") >= 0) return "Previous";
+	if (text.indexOf("Next") >= 0) return "Next";
+	return text;
+}
