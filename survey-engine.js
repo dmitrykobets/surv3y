@@ -202,14 +202,12 @@ class Question {
 			-- the html should contain the question's id so that the it can be properly hidden
 		dynamicHTML -- a function returning html for Question.Types.DYNAMIC_HTML
 		respondTo -- applies to Question.Types.DYNAMIC_HTML -- a list of question names which trigger this question's render method
-		checkboxText -- text to be displayed inline next to checkboxes -- an alternative to the Title element since checkbox names should not be standalone titles
 	*/
-	constructor ({type, name, classes=[], isVertical=false, visibleIf=true, placeholder, defaultValue, disabledIf=false, options=undefined, id=undefined, html=undefined, dynamicHTML=undefined, respondTo=[], checkboxText=undefined, ariaLabel=""}) {
+	constructor ({type, name, classes=[], isVertical=false, visibleIf=true, placeholder, defaultValue, disabledIf=false, options=undefined, id=undefined, html=undefined, dynamicHTML=undefined, respondTo=[]}) {
 		if (type === undefined) {
 			throw Error("Question missing type");
 		}
 		this.type = type;
-		this.ariaLabel = ariaLabel;
 
 		this.visibleIf = isFunction(visibleIf) ? visibleIf : function() {return visibleIf};
 		this.isAlreadyVisible = function() {
@@ -224,13 +222,6 @@ class Question {
 
 		this.classes = classes;
 		this.isVertical = isVertical;
-
-		if (this.type === Question.Types.CHECKBOX) {
-			if (checkboxText === undefined) {
-				throw Error("Missing text for checkbox: " + this.name);
-			}
-			this.checkboxText = checkboxText;
-		}
 
 		if (this.type === Question.Types.HTML || this.type === Question.Types.DYNAMIC_HTML) {
 			if (id === undefined) {
@@ -282,21 +273,21 @@ class Question {
 				case Question.Types.DYNAMIC_HTML:
 					return this.dynamicHTML();
 				case Question.Types.TEXT:
-					var HTML = "<input id='" + this.inputId + "' type='text' aria-label='" + this.ariaLabel + "'/>"
+					var HTML = "<input id='" + this.inputId + "' type='text' />"
 					return HTML;
 				case Question.Types.DATE:
-				    var HTML = "<input id='" + this.inputId + "' type='text' placeholder='YYYY-MM-DD' onfocus='blur();' aria-label='" + this.ariaLabel + "'/>"
+				    var HTML = "<input id='" + this.inputId + "' type='text' placeholder='YYYY-MM-DD' onfocus='blur();' />"
 					return HTML;
 				case Question.Types.NUMBER:
-					var HTML = "<input id='" + this.inputId + "' class='" + this.classes.join(" ") + "' type='number' aria-label='" + this.ariaLabel + "'/>"
+					var HTML = "<input id='" + this.inputId + "' class='" + this.classes.join(" ") + "' type='number' />"
 					return HTML;
 				case Question.Types.CHECKBOX:
-					var HTML = "<label><input id='" + this.inputId + "' type='checkbox'>" + this.checkboxText + "</label>"
+					var HTML = "<input id='" + this.inputId + "' type='checkbox'>"
 					return HTML;
 				case Question.Types.DROPDOWN:
 					var HTML = "<select id='" + this.inputId + "'>"
 					this.options.forEach((o) => {
-						HTML += "<option value='" + o.value + "' aria-label='" + o.text + "'>" + o.text + "</option>"
+						HTML += "<option value='" + o.value + ">" + o.text + "</option>"
 					})
 					HTML += "</select>"
 					return HTML;
@@ -1082,10 +1073,10 @@ Survey.prototype.render = function() {
 	var NAV = "<div id='nav' class='row small-11 medium-8 large-5 columns text-center'>";
 
 	if (this.currentPageIdx !== 0) {
-		NAV += "<input id='prev-btn' type='button' class='button' value='" + this.currentPage().prevBtnText + "' aria-label='" + formatButtonTextForAriaLabel(this.currentPage().prevBtnText) + "'/>"
+		NAV += "<input id='prev-btn' type='button' class='button' value='" + this.currentPage().prevBtnText + "'/>"
 	}
 	if (this.currentPage().isNextButtonVisible === true) {
-		NAV += "<input id='next-btn' type='button' class='button' value='" + this.currentPage().nextBtnText + "' aria-label='" + formatButtonTextForAriaLabel(this.currentPage().nextBtnText)  + "'/>"
+		NAV += "<input id='next-btn' type='button' class='button' value='" + this.currentPage().nextBtnText + "'/>"
 	}
 	NAV += "</div>"
 	$("#page").after(NAV)
@@ -1204,10 +1195,4 @@ function awaitDebounce(func) {
 	} else {
 		func();
 	}
-}
-
-function formatButtonTextForAriaLabel(text) {
-	if (text.indexOf("Previous") >= 0) return "Previous";
-	if (text.indexOf("Next") >= 0) return "Next";
-	return text;
 }
