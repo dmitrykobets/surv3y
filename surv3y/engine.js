@@ -276,7 +276,7 @@ class Question {
 					var HTML = "<input id='" + this.inputId + "' type='text' />"
 					return HTML;
 				case Question.Types.DATE:
-				    var HTML = "<input id='" + this.inputId + "' type='text' placeholder='YYYY-MM-DD' onfocus='blur();' />"
+				    var HTML = "<input id='" + this.inputId + "' type='date' />"
 					return HTML;
 				case Question.Types.NUMBER:
 					var HTML = "<input id='" + this.inputId + "' class='" + this.classes.join(" ") + "' type='number' />"
@@ -287,7 +287,7 @@ class Question {
 				case Question.Types.DROPDOWN:
 					var HTML = "<select id='" + this.inputId + "'>"
 					this.options.forEach((o) => {
-						HTML += "<option value='" + o.value + ">" + o.text + "</option>"
+						HTML += "<option value='" + o.value + "'>" + o.text + "</option>"
 					})
 					HTML += "</select>"
 					return HTML;
