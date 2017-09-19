@@ -22,7 +22,7 @@
 
 
 
-# Survey structure
+# Survey datastructure
 
 ### In the following section:
 - any elements followed by a `?` are optional arguments
