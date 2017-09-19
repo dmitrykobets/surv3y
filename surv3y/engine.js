@@ -203,7 +203,7 @@ class Question {
 		dynamicHTML -- a function returning html for Question.Types.DYNAMIC_HTML
 		respondTo -- applies to Question.Types.DYNAMIC_HTML -- a list of question names which trigger this question's render method
 	*/
-	constructor ({type, name, classes=[], isVertical=false, visibleIf=true, placeholder, defaultValue, disabledIf=false, options=undefined, id=undefined, html=undefined, dynamicHTML=undefined, respondTo=[]}) {
+	constructor ({type, name, isVertical=false, visibleIf=true, placeholder, defaultValue, disabledIf=false, options=undefined, id=undefined, html=undefined, dynamicHTML=undefined, respondTo=[]}) {
 		if (type === undefined) {
 			throw Error("Question missing type");
 		}
@@ -220,7 +220,6 @@ class Question {
 		}
 		this.name = name;
 
-		this.classes = classes;
 		this.isVertical = isVertical;
 
 		if (this.type === Question.Types.HTML || this.type === Question.Types.DYNAMIC_HTML) {
@@ -279,7 +278,7 @@ class Question {
 				    var HTML = "<input id='" + this.inputId + "' type='date' />"
 					return HTML;
 				case Question.Types.NUMBER:
-					var HTML = "<input id='" + this.inputId + "' class='" + this.classes.join(" ") + "' type='number' />"
+					var HTML = "<input id='" + this.inputId + "' type='number' />"
 					return HTML;
 				case Question.Types.CHECKBOX:
 					var HTML = "<input id='" + this.inputId + "' type='checkbox'>"
