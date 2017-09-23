@@ -48,7 +48,7 @@ const validationExample: {
 							text: "Follow the instructions"
 						}),
 						new SurveyError({
-							name: "5RAf7E54a8",
+							name: "trickQuestionCustomError",
 							message: "Write 'Survey' (without the quotes)",
 							logicVisibleIf: function() {return variables["trickQuestion"] !== "'Survey' (without the quotes)"},
 							appearOnChange: true,
