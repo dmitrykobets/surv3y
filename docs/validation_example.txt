@@ -1,0 +1,86 @@
+const validationExample: {
+	pages: [
+		new Page({
+			elements: [
+				new Div({
+					classes: ["row small-6"],
+					children: [
+						// separating the Titles and errors from the questions allows for unique layouts + more style customization
+						new Title({
+							questionName: "PzcPhML0OE",
+							text: "This text is required"
+						}),
+						new RequiredTextError({
+							questionName: "PzcPhML0OE",
+						}),
+						new Question({
+							type: Question.Types.TEXT,
+							name: "PzcPhML0OE",
+						}),
+
+
+						new Title({
+							questionName: "onoRvztsnr",
+							text: "This number cannot be negative!"
+						}),
+						new NegativeNumberError({
+							questionName: "onoRvztsnr",
+						}),
+						new Question({
+							type: Question.Types.NUMBER,
+							name: "onoRvztsnr",
+						}),
+
+						new Title({
+							questionName: "jJlPxv8xsu",
+							text: "This date should not be in the future!"
+						}),
+						new DateInFutureError({
+							questionName: "jJlPxv8xsu",
+						}),
+						new Question({
+							type: Question.Types.DATE,
+							name: "jJlPxv8xsu",
+						}),
+
+						new Title({
+							questionName: "9ZLmBtFSt8",
+							text: "Follow the instructions"
+						}),
+						new SurveyError({
+							name: "5RAf7E54a8",
+							message: "Write 'Survey' (without the quotes)",
+							logicVisibleIf: function() {return variables["9ZLmBtFSt8"] !== "'Survey' (without the quotes)"},
+							appearOnChange: true,
+						}),
+						new Question({
+							type: Question.Types.TEXT,
+							name: "9ZLmBtFSt8",
+						}),
+					]
+				})
+			],
+		}),
+		new Page({
+			elements: [
+				new Div({
+					classes: ["row small-6 text-center"],
+					children: [
+						new Question({
+							type: Question.Types.HTML,
+							id: "vu1reeiriv",
+							html: "<h1 id='vu1reeiriv'>You're done!</h1>",
+							name: "vu1reeiriv",
+						}),
+					]
+				})
+			],
+			isNextButtonVisible: false,
+		}),
+	]
+}
+
+$(document).ready(function() {
+	var survey = new Survey({pages: validationExample.pages, containerJQuery: $("#surveyContainer")}); // this bit initializes the survey and insterts it into a div on the page
+	survey.render();
+})
