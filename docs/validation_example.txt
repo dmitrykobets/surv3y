@@ -7,55 +7,55 @@ const validationExample: {
 					children: [
 						// separating the Titles and errors from the questions allows for unique layouts + more style customization
 						new Title({
-							questionName: "PzcPhML0OE",
+							questionName: "requiredText1",
 							text: "This text is required"
 						}),
 						new RequiredTextError({
-							questionName: "PzcPhML0OE",
+							questionName: "requiredText1",
 						}),
 						new Question({
 							type: Question.Types.TEXT,
-							name: "PzcPhML0OE",
+							name: "requiredText1",
 						}),
 
 
 						new Title({
-							questionName: "onoRvztsnr",
+							questionName: "negativeNumber",
 							text: "This number cannot be negative!"
 						}),
 						new NegativeNumberError({
-							questionName: "onoRvztsnr",
+							questionName: "negativeNumber",
 						}),
 						new Question({
 							type: Question.Types.NUMBER,
-							name: "onoRvztsnr",
+							name: "negativeNumber",
 						}),
 
 						new Title({
-							questionName: "jJlPxv8xsu",
+							questionName: "dateInFuture",
 							text: "This date should not be in the future!"
 						}),
 						new DateInFutureError({
-							questionName: "jJlPxv8xsu",
+							questionName: "dateInFuture",
 						}),
 						new Question({
 							type: Question.Types.DATE,
-							name: "jJlPxv8xsu",
+							name: "dateInFuture",
 						}),
 
 						new Title({
-							questionName: "9ZLmBtFSt8",
+							questionName: "trickQuestion",
 							text: "Follow the instructions"
 						}),
 						new SurveyError({
 							name: "5RAf7E54a8",
 							message: "Write 'Survey' (without the quotes)",
-							logicVisibleIf: function() {return variables["9ZLmBtFSt8"] !== "'Survey' (without the quotes)"},
+							logicVisibleIf: function() {return variables["trickQuestion"] !== "'Survey' (without the quotes)"},
 							appearOnChange: true,
 						}),
 						new Question({
 							type: Question.Types.TEXT,
-							name: "9ZLmBtFSt8",
+							name: "trickQuestion",
 						}),
 					]
 				})
@@ -68,9 +68,9 @@ const validationExample: {
 					children: [
 						new Question({
 							type: Question.Types.HTML,
-							id: "vu1reeiriv",
-							html: "<h1 id='vu1reeiriv'>You're done!</h1>",
-							name: "vu1reeiriv",
+							id: "doneText",
+							html: "<h1 id='doneText'>You're done!</h1>",
+							name: "doneText",
 						}),
 					]
 				})
