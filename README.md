@@ -24,6 +24,8 @@
 
 # Survey datastructure
 
+## The entire survey workflow is captured in the `Survey` object. [Here](https://github.com/dmitrykobets/surv3y/blob/master/docs/validation_example.txt) is the Javascript code for the validation example from above
+
 ### In the following section:
 - any elements followed by a `?` are optional arguments
 - elements followed by `[...]` will take the contents of those brackets as a default parameter
